@@ -213,7 +213,7 @@ SOCKET SocketAccept(SOCKET s, struct sockaddr *addr, int *addrlen, DWORD timeout
 	}
 }
 
-// Hier kommen die gemirrorten CAPI 2.0 Funktionen!
+// Here come the exported CAPI 2.0 Functions
 
 DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 						   DWORD maxLogicalConnection,
@@ -371,7 +371,7 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 		return 0x1108;
 	}
 
-	//Vielleicht auch erst am ende
+	//probably later
 	err=closesocket(server);
 	if(err==SOCKET_ERROR){
 		closesocket(socke);
@@ -511,7 +511,7 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 		return 0x1108;
 	}
 
-	//Vielleicht auch auch später
+	//probably also later
 	err=closesocket(server);
 	if(err==SOCKET_ERROR){
 		closesocket(socke);
