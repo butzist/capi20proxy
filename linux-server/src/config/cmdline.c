@@ -12,6 +12,14 @@
  *
  */
 
+/* 
+ *
+ * The code has proven to be somewhat useable, I think you can use it. 
+ */
+
+
+
+
 #include "../capifwd.h"
 
 
@@ -47,8 +55,8 @@ int eval_cmdline( int argc, char* argv[] ) {
 		{
 			printf("
 %s version %s
-copyright(c) 2002: f. lindenberg, a. szalkowski
-usage:
+Copyright (C) 2002: F. Lindenberg, A. Szalkowski
+Usage:
 \t%s [options]\n\n Where options is one of:
 -h --help or
 -v --version\tprint this info and quit.
