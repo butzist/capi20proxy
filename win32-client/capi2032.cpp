@@ -19,6 +19,10 @@
 
 /*
  * $Log$
+ * Revision 1.14  2002/05/13 11:17:26  butzist
+ * found an error (used == instead of !=)
+ * because of this incoming messages are deleted immediately
+ *
  * Revision 1.13  2002/05/12 06:50:46  butzist
  * changed release version
  *
@@ -70,7 +74,7 @@
 #define VERSION_MINOR	3
 
 #define ILLEGAL_ANSWER		((char*)(void*)-1)
-#define _WAITFORMESSAGE_TIMEOUT		-1
+#define _WAITFORMESSAGE_TIMEOUT		0
 IN_ADDR toaddr;
 
 int status=0;
@@ -593,11 +597,14 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 
 	while(*answer==NULL)
 	{
-		if((timeout!=-1) || (--timeout)) // if timeout occurs
+		if(timeout) // if not timeout disabled (timeout=0)
 		{
+		   if(--timeout) // if timeout occurs
+		    {
 			*answer=ILLEGAL_ANSWER;
 			removeFromHash(msgId);
 			break;
+		    }
 		}
 
 		Sleep(1);	// Ok, the "beautiful" method didn't work :-( brute force RULZ!
