@@ -1,5 +1,5 @@
 /*
- *   capi20proxy linux client module (Provides a remote CAPI port over TCP/IP)
+ *   capi20proxy linux client module (Provides a virtual CAPI controller)
  *   Copyright (c) 2002. Begumisa Gerald & Adam Szalkowski. All rights reserved
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -25,8 +25,6 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#define NOTASK	/* temporarily disabled interruptible_sleep stuff until someone fixes it */
-
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/module.h>
@@ -40,11 +38,9 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 
-#ifndef NOTASK
 #include <linux/sched.h>
 #include <linux/tqueue.h>
 #include <linux/interrupt.h>
-#endif
 
 #include "capilli.h"
 #include "capiutil.h"
@@ -106,9 +102,7 @@ ssize_t capiproxy_write(struct file *file, const char *buffer, size_t length, lo
 int capiproxy_open(struct inode *inode, struct file *file);
 int capiproxy_release(struct inode *inode, struct file *file);
 
-#ifndef NOTASK
 static void handle_send_msg(void *dummy);
-#endif
 
 static void capiproxy_init_appls(capi20proxy_card *card);
 static void capiproxy_release_internal(struct capi_ctr *ctrl, __u16 appl);
@@ -127,14 +121,12 @@ static struct file_operations capiproxy_fops = {
 	lock:		NULL
 };
 
-#ifndef NOTASK
 static struct tq_struct tq_send_notify = {
 	{NULL},
 	0,
 	handle_send_msg,
 	NULL
 };
-#endif
 
 static struct capi_driver capiproxy_driver = {
 	"capi20proxy",
@@ -292,8 +284,7 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	capi_register_params arp;
 
-	if(card->status==CARD_FREE)
-	{
+	if(card->status==CARD_FREE) {
 		printk(KERN_ERR "%s card %d: Tried to register application on free controller\n", DRIVERNAME, ctrl->cnr);
 		(*ctrl->appl_released)(ctrl,appl);
 		return;
@@ -335,7 +326,7 @@ void capiproxy_release_appl(struct capi_ctr *ctrl,
 {
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	
-	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl) || (card->status!=CARD_RUNNING)) {
+	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl)) {
 		(*ctrl->appl_released)(ctrl, appl);
 		printk(KERN_ERR "%s card %d: Releasing free application or invalid applid -- %d\n", DRIVERNAME, ctrl->cnr, appl);
 		return;
@@ -386,8 +377,7 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 
 	printk(KERN_NOTICE "%s card %d: message received from kcapi\n", DRIVERNAME, ctrl->cnr);
 
-	if(card->status==CARD_FREE)
-	{
+	if(card->status==CARD_FREE) {
 		printk(KERN_ERR "%s card %d: message for free card dropped\n", DRIVERNAME, ctrl->cnr);
 		kfree_skb(skb);
 		return;
@@ -409,10 +399,8 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 	spin_unlock(&(card->ctrl_lock));
 
 	
-#ifndef NOTASK
 	queue_task(&tq_send_notify, &tq_immediate);
 	mark_bh(IMMEDIATE_BH);
-#endif
 }
 
 /*
@@ -544,7 +532,6 @@ int capiproxy_ioctl(struct inode *inode,
 
 /* -------------------------------------------------------------------------- */
 
-#ifndef NOTASK
 static void handle_send_msg(void *dummy)
 {
 	int i;
@@ -560,7 +547,6 @@ static void handle_send_msg(void *dummy)
 	}
 
 }
-#endif
 
 /*
  * The daemon blocks at this function until data is
@@ -589,10 +575,7 @@ ssize_t capiproxy_read(struct file *file,
 			return -EAGAIN;
 	
 		for (;;) {
-#ifndef NOTASK
 			interruptible_sleep_on(&card->wait_queue_out);
-#endif
-			
 			if (card->sk_pending)
 				break;
 			if (signal_pending(current))
@@ -668,8 +651,7 @@ ssize_t capiproxy_write(struct file *file,
 	__u32 ncci;
 	unsigned char *writepos;
 
-	if(card->status!=CARD_RUNNING)
-	{
+	if(card->status!=CARD_RUNNING) {
 		printk(KERN_ERR "%s card %d: Card not ready to receive messages\n", DRIVERNAME, ctrl->cnr);
 		return -1;
 	}
@@ -839,8 +821,7 @@ static int __init capiproxy_init(void)
 	di = attach_capi_driver(&capiproxy_driver);
 	spin_unlock(&kernelcapi_lock);
 
-	if (!di)
-	{
+	if (!di) {
 		printk(KERN_ERR "%s: Load of driver failed\n", DRIVERNAME);
 		return -1;
 	} else {
@@ -867,9 +848,7 @@ static void __exit capiproxy_exit(void)
 		capiproxy_remove_ctr(ctrl);
 	}
 
-#ifndef NOTASK
 	handle_send_msg(NULL);
-#endif
 	
 	unregister_chrdev(CAPIPROXY_MAJOR, DRIVERNAME);
 
