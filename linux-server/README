@@ -17,19 +17,25 @@ CAPI 2.0 Proxy Project,
 
 2. Installing the Linux Server. 
  First, be sure to have the latest version of CapiFwd either from 
- sf.net/projects/capi20proxy or directly from CVS.
+ sf.net/projects/capi20proxy or directly from CVS. You also might 
+ want to check out http://frlind.no-ip.org/code, I post pre-release 
+ versions there. 
  Also make sure to have libcapi installed, as this library is needed
  by the server. I hope to be able to use kernelcapi instead in a 
- future version but until then go visit www.capi4linux.org. 
- Then, simply type 'cd src && make' at the command promt, a configure script
- is not needed.
+ future version but until then go visit www.capi4linux.org to get 
+ capi4kutils or libcapi20.
+ 
+ Then, simply type 'cd src && make all install' at the command promt, 
+ a configure script is currently not needed.
  
 3. Misc.
  For support, questions or anything else (we don't sell drugs), send 
- e-mail to capi20proxy-public@lists.sourceforge.net. 
- You could also try to send e-mail to frlind@frlind.de or 
- adam@szalkowski.de but we are so cool, we won't answer (maybe??).
+ e-mail to capi20proxy-public@lists.sourceforge.net. You could also 
+ try to send e-mail to frlind@frlind.de or adam@szalkowski.de.
 
+
+
+---------------------------------------------------------------------------
  (C)opyright 2002: Adam Szalkowski, Friedrich Lindenberg, Begumisa Gerald. 
  All rights reserved. This program is released under the conditions of the 
  GNU General Public License (GNU GPL) Version 2, or (at your option) any 
