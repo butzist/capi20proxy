@@ -42,7 +42,7 @@
 #include "protocol.h"
 
 #define _progname_long "capi20proxy/capifwd daemon"
-#define _version "0.6.3"
+#define _version "0.7"
 
 #define	_PACKET_SIZE 10000
 
