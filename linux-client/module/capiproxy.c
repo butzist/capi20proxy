@@ -39,6 +39,7 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/tqueue.h>
+#include <linux/kern_compat.h>
 
 #include "capilli.h"
 #include "capiutil.h"
@@ -176,7 +177,7 @@ static struct tq_struct tq_send_notify = {
 };
 
 static struct capi_driver capiproxy_driver = {
-	"capi20proxy",
+	DRIVERNAME,
 	"1.4",
 	capiproxy_load_firmware,
 	capiproxy_reset_ctr,
@@ -231,10 +232,10 @@ static void capiproxy_flush_queue(capi20proxy_card *card)
 {
 	struct sk_buff *skb;
 
+	spin_lock(&(card->ctrl_lock));
 	while ((skb = skb_dequeue(&(card->outgoing_queue))) != 0)
 		kfree_skb(skb);
 
-	spin_lock(&(card->ctrl_lock));
 	card->sk_pending = 0;
 	spin_unlock(&(card->ctrl_lock));
 }
@@ -242,6 +243,7 @@ static void capiproxy_flush_queue(capi20proxy_card *card)
 void capiproxy_remove_ctr(struct capi_ctr *ctrl)
 {
 	struct sk_buff *skb;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	__u16 len;
 	__u16 appl;
 	__u8 command, subcommand;	
@@ -267,29 +269,12 @@ void capiproxy_remove_ctr(struct capi_ctr *ctrl)
 	CAPIMSG_SETCOMMAND(skb->data, command);
 	CAPIMSG_SETSUBCOMMAND(skb->data, subcommand);
 	
-	/*
-	 * Do we really need to lock kernel capi at this
-	 * point?  My hunch was that once we suspend the
-	 * output to the card, nothing shady should 
-	 * happen
-	 */
-
-	/*
-	 * maybe.... let's try
-	 */
+	(*ctrl->suspend_output)(ctrl);
+	capiproxy_flush_queue(card);
 	
 	capiproxy_send_message(ctrl, skb);
 
-	/*
-	 * We won't do this immediately
-	 * let first the daemon detach!
-	 * 
-	 *  (*ctrl->suspend_output)(ctrl);
-	 *  capiproxy_flush_queue(CARD(ctrl->cnr));
-	 *  capiproxy_send_message(ctrl, skb);
-	 *  (*di->detach_ctr)(ctrl);
-	 *  ((capi20proxy_card*)ctrl->driverdata)->status = CARD_FREE;
-	*/
+	/* do not detach the controller yet, wait for the daemon to detach first */
 }
 
 void capiproxy_reset_ctr(struct capi_ctr *ctrl)
@@ -314,7 +299,7 @@ static void capiproxy_register_internal(struct capi_ctr *ctrl, __u16 appl,
 	
 	len = sizeof(__u16)*2 + sizeof(__u8)*2 + sizeof(__u32)*3;
 	if(!(skb = alloc_skb(len + 1, GFP_ATOMIC))) {
-		printk(KERN_ERR "capi20proxy card %d: Could not allocate memory", ctrl->cnr);
+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
 		return;
 	}
 	CAPIMSG_SETLEN(skb->data, len);
@@ -335,7 +320,7 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
 	capi_register_params arp;
 
 	if (!APPL_IS_FREE(card,appl)) {
-		printk(KERN_ERR "capi20proxy card %d: Application %d already registered\n", card->ctrl->cnr, appl);
+		printk(KERN_ERR "%s card %d: Application %d already registered\n", DRIVERNAME, card->ctrl->cnr, appl);
 		return;
 	}
 	
@@ -345,7 +330,7 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
 
 	capiproxy_register_internal(ctrl, appl, &arp);
 	APPL_MARK_WAITING(card,appl);
-	printk(KERN_NOTICE "capi20proxy card %d: Application %d registering\n",card->ctrl->cnr, appl);
+	printk(KERN_NOTICE "%s card %d: Application %d registering\n", DRIVERNAME, card->ctrl->cnr, appl);
 }
 
 /*
@@ -372,14 +357,14 @@ void capiproxy_release_appl(struct capi_ctr *ctrl,
 	
 	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl)) {
 		(*ctrl->appl_released)(ctrl, appl);
-		printk(KERN_ERR "capi20proxy card %d: Releasing free application or invalid applid -- %d\n", ctrl->cnr, appl);
+		printk(KERN_ERR "%s card %d: Releasing free application or invalid applid -- %d\n", DRIVERNAME, ctrl->cnr, appl);
 		return;
 	}
 	capiproxy_release_internal(ctrl, appl);
 	APPL_MARK_FREE(card,appl);
 	//DEC_MOD_USE_COUNT;	
 	(*ctrl->appl_released)(ctrl, appl);
-	printk(KERN_NOTICE "capi20proxy card %d: Application released %d\n", ctrl->cnr, appl);
+	printk(KERN_NOTICE "%s card %d: Application released %d\n", DRIVERNAME, ctrl->cnr, appl);
 }
 
 static void capiproxy_release_internal(struct capi_ctr *ctrl, 
@@ -400,7 +385,7 @@ static void capiproxy_release_internal(struct capi_ctr *ctrl,
 
 	len = sizeof(__u16)*2 + sizeof(__u8)*2;
 	if(!(skb = alloc_skb(len+1, GFP_ATOMIC))) {
-		printk(KERN_ERR "capi20proxy card %d: Could not allocate memory", ctrl->cnr);
+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
 		return;
 	}
         CAPIMSG_SETLEN(skb->data, len);
@@ -432,7 +417,7 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 	card->sk_pending += 1;
 	spin_unlock(&(card->ctrl_lock));
 
-	printk(KERN_NOTICE "capi20proxy card %d: message received from kcapi", ctrl->cnr);
+	printk(KERN_NOTICE "%s card %d: message received from kcapi", DRIVERNAME, ctrl->cnr);
 	
 	/* what does this do??? */
 	queue_task(&tq_send_notify, &tq_immediate);
@@ -536,7 +521,7 @@ int capiproxy_ioctl(struct inode *inode,
 					(void **)(&temp),
 					sizeof(struct capi_profile));
 			(*ctrl->ready)(ctrl);
-			printk(KERN_NOTICE "capi20proxy card %d: controller ready", ctrl->cnr);
+			printk(KERN_NOTICE "%s card %d: controller ready", DRIVERNAME, ctrl->cnr);
 			return 0;
 		}
 		case IOCTL_ERROR_REGFAIL:
@@ -544,7 +529,7 @@ int capiproxy_ioctl(struct inode *inode,
 			push_user_buffer((void *)&appl,(void **)(&temp),2);			
 			APPL_MARK_REVOKED(card,appl);
 			(*ctrl->appl_released)(ctrl, appl);
-			printk(KERN_NOTICE "capi20proxy card %d: deamon failed to register application %d", ctrl->cnr, appl);
+			printk(KERN_NOTICE "%s card %d: deamon failed to register application %d", DRIVERNAME, ctrl->cnr, appl);
 			return 0;
 		}
 		case IOCTL_APPL_REGISTERED:
@@ -552,7 +537,7 @@ int capiproxy_ioctl(struct inode *inode,
 			(*ctrl->appl_registered)(ctrl, appl);
 			APPL_MARK_CONFIRMED(card,appl);
 			//INC_MOD_USE_COUNT;
-			printk(KERN_NOTICE "capi20proxy card %d: daemon confirmed application %d", ctrl->cnr, appl);
+			printk(KERN_NOTICE "%s card %d: daemon confirmed application %d", DRIVERNAME, ctrl->cnr, appl);
 			return 0;
 		}
 		default:
@@ -630,7 +615,7 @@ ssize_t capiproxy_read(struct file *file,
 
 	if(skb->len < 6) {
 		/* message ist too short take the next one */
-		printk(KERN_WARNING "capi20proxy: too short message dropped");
+		printk(KERN_WARNING "%s: too short message dropped", DRIVERNAME);
 		return capiproxy_read(file,buffer,length,offset);
 	}
 		
@@ -659,7 +644,7 @@ ssize_t capiproxy_read(struct file *file,
 	retval = copy_to_user(buffer, skb->data, skb->len);
 	if(retval) {
 		skb_queue_head(&card->outgoing_queue,skb);
-		printk(KERN_ERR "capi20proxy: error %x in copy_to_user()",retval);
+		printk(KERN_ERR "%s: error %x in copy_to_user()", DRIVERNAME, retval);
 		return retval;
 	}
 	copied = skb->len;
@@ -692,7 +677,7 @@ ssize_t capiproxy_write(struct file *file,
 
 	/* don't we get the length from the legth parameter? */
 	if(!(skb = alloc_skb(length+1, GFP_ATOMIC))) {
-		printk(KERN_ERR "capi20proxy card %d: Could not allocate memory", ctrl->cnr);
+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
 		return -1;
 	}
 	
@@ -754,7 +739,7 @@ int capiproxy_open(struct inode *inode, struct file *file)
 	ctrl = card->ctrl;
 	id = capiproxy_find_free_id();
 	if(id == -1) {
-		printk(KERN_ERR "capi20proxy: no free controllers left");
+		printk(KERN_ERR "%s: no free controllers left", DRIVERNAME);
 		return -1;
 	}
 
@@ -792,7 +777,7 @@ int capiproxy_release(struct inode *inode, struct file *file)
 	 * should this not be done somehow by kernelcapi?
 	 */
 
-	printk(KERN_NOTICE "capi20proxy: removing Controller %d", ctrl->cnr);
+	printk(KERN_NOTICE "%s: removing Controller %d", DRIVERNAME, ctrl->cnr);
 	
 	(*ctrl->suspend_output)(ctrl);
 	capiproxy_flush_queue(card);
@@ -806,7 +791,7 @@ int capiproxy_release(struct inode *inode, struct file *file)
 	 * Should we unregister all apps?
 	 */
 
-	printk(KERN_NOTICE "capi20proxy: Controller %d released", ctrl->cnr);
+	printk(KERN_NOTICE "%s: Controller %d released", DRIVERNAME, ctrl->cnr);
 	MOD_DEC_USE_COUNT;
 	return 0;
 }
@@ -831,7 +816,7 @@ static void capiproxy_init_appls(capi20proxy_card *card)
 
 /* ------------------------------------------------------------- */
 
-EXPORT_SYMBOL(capiproxy_register_appl);
+/*EXPORT_SYMBOL(capiproxy_register_appl);
 EXPORT_SYMBOL(capiproxy_release_appl);
 EXPORT_SYMBOL(capiproxy_remove_ctr);
 EXPORT_SYMBOL(capiproxy_send_message);
@@ -844,7 +829,7 @@ EXPORT_SYMBOL(capiproxy_ioctl);
 EXPORT_SYMBOL(capiproxy_read);
 EXPORT_SYMBOL(capiproxy_write);
 EXPORT_SYMBOL(capiproxy_open);
-EXPORT_SYMBOL(capiproxy_release);
+EXPORT_SYMBOL(capiproxy_release);*/
 
 static int __init capiproxy_init(void)
 {
@@ -854,14 +839,14 @@ static int __init capiproxy_init(void)
 	register_chrdev(CAPIPROXY_MAJOR, DRIVERNAME, &capiproxy_fops);
 
 	spin_lock(&kernelcapi_lock);
-	sprintf(capiproxy_driver.name, "capi20proxy");
+	sprintf(capiproxy_driver.name, DRIVERNAME);
 	sprintf(capiproxy_driver.revision, "%s", main_revision);
 	di = attach_capi_driver(&capiproxy_driver);
 	spin_unlock(&kernelcapi_lock);
 
 	if (!di)
 	{
-		printk(KERN_ERR "capi20proxy: Load of driver failed\n");
+		printk(KERN_ERR "%s: Load of driver failed\n", DRIVERNAME);
 		return -1;
 	} else {
 		printk(KERN_NOTICE "%s loaded\n", DRIVERNAME);
