@@ -43,7 +43,7 @@ int main(int argc, char* argv[])
 		}
 	}
 	
-	// Datei für Debug Output öffnen
+	// open file for debug output
 	if(debug==0) f=fopen("c:\\winnt\\capi20proxy.log","a+t");
 
 	for(i=1;i<argc;i++) {
@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
 	}
 
 
-	//Die Windows Socket Architektur wird gestartet
+	//Startup Windows Socket Architecture
 	
 	WSADATA wsadata;
 	if(WSAStartup(MAKEWORD(2,2),&wsadata)!=0){
@@ -132,8 +132,8 @@ int main(int argc, char* argv[])
 	}
 
 	
-	// Wenn nicht der Debug-Modus (alle Debugmeldungen werden in eine Konsole ausgegeben
-	// und die Anwendung wird nicht als service gestartet) angefordert wurde (mit parameter -debug)
+	// The Debug mode starts the server in a console (not as a service in 
+	// the background). All messages are sent to the console.
 	if(!debug){
 		SERVICE_TABLE_ENTRY   DispatchTable[] = 
 		{ 
@@ -153,7 +153,7 @@ int main(int argc, char* argv[])
 		if(RunningThread==NULL){
 			DebugOut("main(): CreateThread");
 		} else {
-			::MessageBox(NULL,"\"OK\" drücken um Server zu beenden","Remote CAPI 2.0 Server",MB_OK);
+			::MessageBox(NULL,"\"OK\" to shutdown the server","Capi 2.0 Proxy Server",MB_OK);
 			ServiceExit();
 		}
 	}

@@ -1,3 +1,4 @@
+// CAPI functions
 extern "C" {
 extern DWORD APIENTRY CAPI_REGISTER (DWORD MessageBufferSize, DWORD maxLogicalConnection, DWORD maxBDataBlocks, DWORD maxBDataLen, DWORD *pApplID);
 extern DWORD APIENTRY CAPI_RELEASE (DWORD ApplID);
