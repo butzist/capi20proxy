@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.12  2002/05/12 06:24:06  butzist
+ * added binaries and disabled timeout
+ *
  * Revision 1.11  2002/04/11 09:02:07  butzist
  * found a bug (timeout)
  *
@@ -61,7 +64,7 @@
 #include "capi2032.h"
 
 #define VERSION_MAJOR	1
-#define VERSION_MINOR	2
+#define VERSION_MINOR	3
 
 #define ILLEGAL_ANSWER		((char*)(void*)-1)
 #define _WAITFORMESSAGE_TIMEOUT		-1
