@@ -39,7 +39,6 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/tqueue.h>
-#include "/usr/src/linux-2.4.19/include/linux/modversions.h"
 
 #include "capilli.h"
 #include "capiutil.h"
