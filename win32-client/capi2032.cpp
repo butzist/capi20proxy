@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.16  2002/05/13 12:12:55  butzist
+ * oh no, I can't think today... perhaps now it's right
+ *
  * Revision 1.15  2002/05/13 11:58:32  butzist
  * maybe now it works :-)
  *
@@ -603,13 +606,12 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 		if(timeout) // if not timeout disabled (timeout=0)
 		{
 		   if(--timeout==0) // if timeout occurs
-		    {
-			*answer=ILLEGAL_ANSWER;
-			removeFromHash(msgId);
-			break;
-		    }
+		   {
+			   *answer=ILLEGAL_ANSWER;
+			   removeFromHash(msgId);
+			   break;
+		   }
 		}
-
 		Sleep(1);	// Ok, the "beautiful" method didn't work :-( brute force RULZ!
 	}
 
