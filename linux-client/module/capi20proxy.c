@@ -25,6 +25,8 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define NOTASK	/* temporarily disabled interruptible_sleep stuff until someone fixes it */
+
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/module.h>
@@ -35,11 +37,14 @@
 #include <linux/config.h>
 #include <linux/smp_lock.h>
 #include <linux/vmalloc.h>
-#include <linux/sched.h>
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
+
+#ifndef NOTASK
+#include <linux/sched.h>
 #include <linux/tqueue.h>
-#include <linux/kern_compat.h>
+#include <linux/interrupt.h>
+#endif
 
 #include "capilli.h"
 #include "capiutil.h"
@@ -118,7 +123,7 @@ static struct capi_driver_interface *di;
  * Wait queue for any call to rmmod while there
  * are tasks in the queue
  */
-
+#ifndef NOTASK
 wait_queue_head_t rmmod_queue;
 
 /*
@@ -126,6 +131,7 @@ wait_queue_head_t rmmod_queue;
  */
 
 static __u16 system_shutting_down = 0;
+#endif
 
 static char *main_revision	= "$Revision$";
 static char *capiproxy_version	= "0.6.1";
@@ -150,8 +156,10 @@ ssize_t capiproxy_write(struct file *file, const char *buffer, size_t length, lo
 int capiproxy_open(struct inode *inode, struct file *file);
 int capiproxy_release(struct inode *inode, struct file *file);
 
-
+#ifndef NOTASK
 static void handle_send_msg(void *dummy);
+#endif
+
 static void capiproxy_init_appls(capi20proxy_card *card);
 static void capiproxy_release_internal(struct capi_ctr *ctrl, __u16 appl);
 static int capiproxy_find_free_id(void);
@@ -169,15 +177,17 @@ static struct file_operations capiproxy_fops = {
 	lock:		NULL
 };
 
+#ifndef NOTASK
 static struct tq_struct tq_send_notify = {
 	{NULL},
 	0,
 	handle_send_msg,
 	NULL
 };
+#endif
 
 static struct capi_driver capiproxy_driver = {
-	DRIVERNAME,
+	"capi20proxy",
 	"1.4",
 	capiproxy_load_firmware,
 	capiproxy_reset_ctr,
@@ -419,9 +429,10 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 
 	printk(KERN_NOTICE "%s card %d: message received from kcapi", DRIVERNAME, ctrl->cnr);
 	
-	/* what does this do??? */
+#ifndef NOTASK
 	queue_task(&tq_send_notify, &tq_immediate);
 	mark_bh(IMMEDIATE_BH);
+#endif
 }
 
 /*
@@ -546,9 +557,9 @@ int capiproxy_ioctl(struct inode *inode,
 	}
 }
 
-/* --------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
 
-/* and what does this do? */
+#ifndef NOTASK
 static void handle_send_msg(void *dummy)
 {
 	int i;
@@ -568,6 +579,7 @@ static void handle_send_msg(void *dummy)
 		wake_up_interruptible(&rmmod_queue);
 	}
 }
+#endif
 
 /*
  * The daemon blocks at this function until data is
@@ -596,8 +608,10 @@ ssize_t capiproxy_read(struct file *file,
 			return -EAGAIN;
 	
 		for (;;) {
+#ifndef NOTASK
 			interruptible_sleep_on(&card->wait_queue_out);
-
+#endif
+			
 			if (card->sk_pending)
 				break;
 			if (signal_pending(current))
@@ -831,8 +845,10 @@ EXPORT_SYMBOL(capiproxy_release);*/
 static int __init capiproxy_init(void)
 {
 	capiproxy_init_cards();
-	init_waitqueue_head(&rmmod_queue);
 
+#ifndef NOTASK
+	init_waitqueue_head(&rmmod_queue);
+#endif
 	register_chrdev(CAPIPROXY_MAJOR, DRIVERNAME, &capiproxy_fops);
 
 	spin_lock(&kernelcapi_lock);
@@ -869,10 +885,12 @@ static void __exit capiproxy_exit(void)
 		capiproxy_remove_ctr(ctrl);
 	}
 
+#ifndef NOTASK
 	system_shutting_down = 1;
 	while(system_shutting_down)
 		interruptible_sleep_on(&rmmod_queue);
-
+#endif
+	
 	unregister_chrdev(CAPIPROXY_MAJOR, DRIVERNAME);
 
 	detach_capi_driver(&capiproxy_driver);
