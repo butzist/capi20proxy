@@ -1,4 +1,4 @@
-DESCRIPTION "Remote CAPI20 Interface Client by [Butzisten]The Red Wutz"
+DESCRIPTION "Remote CAPI20 Interface Client by [Butzisten]The Red Guy"
 
 EXPORTS
 	;CAPI_MANUFACTURER		@99	PRIVATE

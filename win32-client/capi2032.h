@@ -94,7 +94,7 @@ int rbodysize(UINT type)
 		return sizeof(REQUEST_PROXY_KEEPALIVE);
 
 	case TYPE_PROXY_SHUTDOWN:
-		return sizeof(REQUEST_PROXY_SHUTDOWN);
+		return 0;
 
 	default:
 		return -1;
@@ -156,6 +156,7 @@ int abodysize(UINT type)
 
 void initControllerNum();
 DWORD initConnection();
+DWORD shutdownConnection();
 DWORD WINAPI messageDispatcher(LPVOID param);
 DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer, DWORD CtrlNr);
 DWORD APIENTRY CAPI_RELEASE(DWORD ApplID);

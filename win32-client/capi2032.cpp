@@ -35,7 +35,7 @@
 #include "protocol.h"
 #include "capi2032.h"
 
-#define VERSION_MAJOR	1
+#define VERSION_MAJOR	0
 #define VERSION_MINOR	1
 
 
@@ -55,8 +55,7 @@ extern "C"
 
 unsigned char ctrl_map[MAX_CONTROLLERS+1];
 
-LPVOID GlobalBuffer1=NULL;
-LPVOID GlobalBuffer2=NULL;
+LPVOID GlobalBuffer=NULL;
 
 IN_ADDR toaddr;
 
@@ -145,8 +144,16 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 	case DLL_PROCESS_DETACH:
 
-		if(GlobalBuffer1!=NULL) free(GlobalBuffer1);
-		if(GlobalBuffer2!=NULL) free(GlobalBuffer2);
+		if(GlobalBuffer!=NULL) free(GlobalBuffer);
+
+		run=0;
+		if(WaitForSingleObject(receiver,5000)!=WAIT_OBJECT_0)
+		{
+			shutdownConnection();
+			TerminateThread(receiver,1);
+		} else {
+			shutdownConnection();
+		}
 
 		WSACleanup();
 
@@ -406,6 +413,11 @@ DWORD initConnection()
 	return 0;
 }
 
+DWORD shutdownConnection()
+{
+	return closesocket(socke);
+}
+
 DWORD sendRequest(char* msg)
 {
 	return SocketSend(socke,msg,((REQUEST_HEADER*)msg)->message_len,0,5);
@@ -467,6 +479,8 @@ DWORD removeFromHash(UINT _msgId)
 		prev=queue;
 		queue=queue->next;
 	}
+	
+	return 0;
 }
 
 HANDLE getThreadFromMsgId(UINT _msgId)
@@ -505,7 +519,7 @@ bool verifyMessage(char* msg, UINT type)
 		return false;
 	}
 
-	if(aheader->body_len<abodysize(type))
+	if(aheader->body_len<(unsigned int)abodysize(type))
 	{
 		//  too short body
 		return false;
@@ -584,6 +598,8 @@ DWORD WINAPI messageDispatcher(LPVOID param)
 			}
 		}
 	}
+
+	return 0;
 }
 
 
@@ -598,7 +614,6 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 						   DWORD *pApplID)
 {
 	DWORD local_app=0;
-	char buffer[512];
 	DWORD err;
 	
 	// register the application first on the local oldcapi2032.dll
@@ -632,7 +647,7 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	rbody->messageBufferSize=MessageBufferSize;
 	rbody->maxLogicalConnection=maxLogicalConnection;
 	rbody->maxBDataBlocks=maxBDataBlocks;
-	rbody->maxBDataLen=maxDataLen;
+	rbody->maxBDataLen=maxBDataLen;
 
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_REGISTER);
 	// Ok, the message is ready, now let us send it and wait for the answer
@@ -645,9 +660,9 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	// when the function terminates we are sure to have received a message
 
 
-	ANSWER_HEADER *aheader=(ANSWER_HEADER*)msg;
-	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_REGISTER*)(msg+aheader->header_len);
-	char* adata=msg+aheader->header_len+aheader->body_len;
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_REGISTER*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
 
 	if(!verifyMessage(answer,TYPE_CAPI_REGISTER))
 	{
@@ -689,9 +704,6 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 
 	delApp(local_app);		// delete the appId from the map
 
-	char buffer[512];
-	DWORD err;
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -709,7 +721,7 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	rheader->message_type=TYPE_CAPI_RELEASE;
 	rheader->message_id=id;
 
-	rheader->app_id=ApplId;
+	rheader->app_id=ApplID;
 	rheader->session_id=session_id;
 
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_RELEASE);
@@ -723,9 +735,9 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	// when the function terminates we are sure to have received a message
 
 
-	ANSWER_HEADER *aheader=(ANSWER_HEADER*)msg;
-	ANSWER_CAPI_RELEASE *abody=(ANSWER_CAPI_RELEASE*)(msg+aheader->header_len);
-	char* adata=msg+aheader->header_len+aheader->body_len;
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_RELEASE *abody=(ANSWER_CAPI_RELEASE*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
 
 	if(!verifyMessage(answer,TYPE_CAPI_RELEASE))
 	{
@@ -761,148 +773,85 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 		}
 	}
 
-	char buffer[512];
-	DWORD err;
 	char *data1,*data2;
 	UINT len1=0,len2=0;
-	int len;
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
-		return 0x1108;
-	}
-	SOCKADDR_IN to,clientaddr,me;
-	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
-
-	SOCKET server=CreateSocket(SOCK_STREAM,IPPROTO_TCP,0);
-	if(server==INVALID_SOCKET){
-		closesocket(socke);
-		return 0x1108;
-	}
-	err=listen(server,5);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	ANSWER *answer;
-	REQUEST request;
-	request.data.rd_put_message.ApplID=ApplID;
-	
-	len=sizeof(SOCKADDR_IN);
-	err=getsockname(server,(SOCKADDR*)&me,&len);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	request.data.rd_put_message.me=me;
-	request.type=TYPE_PUT_MESSAGE;
-
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
 
 	data1=(char*)pCAPIMessage;
+
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
+		return 0x1108;
+	}
+
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_PUTMESSAGE *rbody=(REQUEST_CAPI_PUTMESSAGE*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PUTMESSAGE);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_PUTMESSAGE);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_PUTMESSAGE;
+	rheader->message_id=id;
+
+	rheader->app_id=ApplID;
+	rheader->session_id=session_id;
+	rheader->controller_id=msgGetController(data1);
+	
 	memcpy(&len1,data1,2);
-
-	SOCKET connection=SocketAccept(server,(SOCKADDR*)&clientaddr,&len,120);
-	if(connection==INVALID_SOCKET){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	//probably later
-	err=closesocket(server);
-	if(err==SOCKET_ERROR){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-
-	err=SocketSend(connection,data1,2,0,2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(connection);
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-	
-	err=SocketSend(connection,data1+2,len1-2,0,2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(connection);
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-	
-	/*err=closesocket(connection);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}*/
+	memcpy(rdata,data1,len1);	// copy the CAPI message to the message
+	rheader->data_len+=len1;	// add the CAPI message length to the data_length
 
 	unsigned char cmd1=data1[4];
 	unsigned char cmd2=data1[5];
 
-	if((cmd1==0x86) && (cmd2==0x80)){
-		/*connection=accept(server,(SOCKADDR*)&clientaddr,&len);
-		if(connection==INVALID_SOCKET){
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}*/
-		
-		memcpy(&len2,data1+16,2);
+	if((cmd1==0x86) && (cmd2==0x80)) // If we got a DATA_B3 REQUEST
+	{
+		memcpy(&len2,data1+16,2);		// Get the data length from the CAPI message
 		DWORD pointer;
 		memcpy(&pointer,data1+12,4);
-		data2=(char*)(LPVOID)pointer;
+		data2=(char*)(LPVOID)pointer;	// This is the pointer to the data
 
-		err=SocketSend(connection,data2,len2,0,2);
-		if((err==SOCKET_ERROR) || (err==0)){
-			closesocket(connection);
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}
-		
+		memcpy(rdata+len1,data2,len2);	// add the data to the message
+		rheader->data_len+=len2;
 	}
 
-	err=closesocket(connection);
-	if(err==SOCKET_ERROR){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PUTMESSAGE)+len1+len2;
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
+	sendRequest(request);
+	free((void*)request);
+
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
+
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_PUTMESSAGE *abody=(ANSWER_CAPI_PUTMESSAGE*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_PUTMESSAGE))
+	{
+        free((void*)answer);
+		return 0x1108;
+	}	
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
 		return 0x1108;
 	}
 
-	answer=(ANSWER*)buffer;
-	
-	return answer->data.ad_put_message.ret;
+	return capi_error;
 }
 
 DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 {
-	DWORD err;
-
 	if(old_get_message!=NULL)
 	{
 		 if(old_get_message(getLocalApp(ApplID), ppCAPIMessage)==0x0000)
@@ -914,225 +863,166 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 		 }
 	}
 
-	char buffer[512];
 	UINT len1=0,len2=0;
 
-	int len;
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return 0x1108;
 	}
 
-	SOCKADDR_IN to,clientaddr,me;
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_GETMESSAGE *rbody=(REQUEST_CAPI_GETMESSAGE*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_GETMESSAGE);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_GETMESSAGE);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_GETMESSAGE;
+	rheader->message_id=id;
+
+	rheader->app_id=ApplID;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_GETMESSAGE);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	sendRequest(request);
+	free((void*)request);
 
-	SOCKET server=CreateSocket(SOCK_STREAM,IPPROTO_TCP,0);
-	if(server==INVALID_SOCKET){
-		closesocket(socke);
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
+
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_GETMESSAGE *abody=(ANSWER_CAPI_GETMESSAGE*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_GETMESSAGE))
+	{
+        free((void*)answer);
 		return 0x1108;
-	}
+	}	
 	
-	err=listen(server,2);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
+	if(aheader->data_len<8) // data too short
+	{
+		free((void*)answer);
 		return 0x1108;
 	}
 
-	ANSWER *answer;
-	REQUEST request;
-	request.data.rd_get_message.ApplID=ApplID;
-	
-	len=sizeof(SOCKADDR_IN);
-	err=getsockname(server,(SOCKADDR*)&me,&len);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
+	if(GlobalBuffer!=NULL) GlobalFree(GlobalBuffer);
+	// This App is written to deal with only one App....
+	// For multiple Applications we must implement a GlobalBuffer for each Application
+	GlobalBuffer=GlobalAlloc(GPTR,aheader->data_len);
+	if(GlobalBuffer==NULL)
+	{
 		return 0x1108;
 	}
-	
-	request.data.rd_get_message.me=me;
-	request.type=TYPE_GET_MESSAGE;
+	memcpy(GlobalBuffer,adata,aheader->data_len);
 
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(server);
-		closesocket(socke);
+	memcpy(&len1,GlobalBuffer,2);		// get the length of the CAPI message
+	if(aheader->data_len<len1) // data too short
+	{
+		free((void*)answer);
 		return 0x1108;
 	}
 
-	
-	SOCKET connection=SocketAccept(server,(SOCKADDR*)&clientaddr,&len,120);
-	if(connection==INVALID_SOCKET){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
+	unsigned char cmd1=((char*)GlobalBuffer)[4];
+	unsigned char cmd2=((char*)GlobalBuffer)[5];
 
-	//probably also later
-	err=closesocket(server);
-	if(err==SOCKET_ERROR){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=SocketReceive(connection,(char*)&len1,2,0,10);
-	if((err==SOCKET_ERROR) || (err<2) || (len1<8)){
-		closesocket(connection);
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	if(GlobalBuffer1!=NULL) GlobalFree(GlobalBuffer1);
-	GlobalBuffer1=GlobalAlloc(GPTR,len1);
-	if(GlobalBuffer1==NULL){
-		closesocket(connection);
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	
-	memcpy(GlobalBuffer1,&len1,2);
-	err=SocketReceive(connection,((char*)GlobalBuffer1+2),len1-2,0,10);
-	if((err==SOCKET_ERROR) || (err<(len1-2))){
-		closesocket(connection);
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}
-	
-	/*err=closesocket(connection);
-	if(err==SOCKET_ERROR){
-		closesocket(server);
-		closesocket(socke);
-		return 0x1108;
-	}*/
-
-	unsigned char cmd1=((char*)GlobalBuffer1)[4];
-	unsigned char cmd2=((char*)GlobalBuffer1)[5];
-
-	if((cmd1==0x86) && (cmd2==0x82)){
+	if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
+	{
 		if(len1<18){
-			closesocket(server);
-			closesocket(socke);
+			free((void*)answer);
 			return 0x1108;
 		}
 		
-		/*connection=accept(server,(SOCKADDR*)&clientaddr,&len);
-		if(connection==INVALID_SOCKET){
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}*/
-		
-		memcpy(&len2,((char*)GlobalBuffer1)+16,2);
-		if(GlobalBuffer2!=NULL) GlobalFree(GlobalBuffer2);
-		GlobalBuffer2=GlobalAlloc(GPTR,len2);
-		if(GlobalBuffer2==NULL){
-			closesocket(connection);
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}
-		
-		err=SocketReceive(connection,((char*)GlobalBuffer2),len2,0,10);
-		if((err==SOCKET_ERROR) ||  (err==0) || (err<len2)){
-			closesocket(connection);
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}
+		memcpy(&len2,((char*)GlobalBuffer)+16,2);	// get the lengtzh of the data
 
-		
-		DWORD pointer;
-		pointer=(DWORD)GlobalBuffer2;
-		if(pointer==0){
-			closesocket(connection);
-			closesocket(server);
-			closesocket(socke);
-			return 0x1108;
-		}
-		memcpy(((char*)GlobalBuffer1)+12,&pointer,4);
-
+		DWORD pointer=(DWORD)GlobalBuffer+len1;		// data is appended to the message
+		memcpy(((char*)GlobalBuffer)+12,&pointer,4);
 	}
-	
-	err=closesocket(connection);
-	if(err==SOCKET_ERROR){
-		closesocket(socke);
+
+	*ppCAPIMessage=GlobalBuffer;
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
 		return 0x1108;
 	}
 
-	*ppCAPIMessage=GlobalBuffer1;
-
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return 0x1108;
-	}
-
-	answer=(ANSWER*)buffer;
-	
-	return answer->data.ad_get_message.ret;
+	return capi_error;
 }
 
 DWORD WINAPI waiting_proc_1(void* param)
 {
-	DWORD err;
-	char buffer[512];
-	
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
-		return 0x1108;
-	}
-	
-	SOCKADDR_IN to;
-	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	DWORD ApplID=(DWORD)param;
 
-	ANSWER *answer;
-	REQUEST request;
-	request.data.rd_wait_for_signal.ApplID=(DWORD)param;
-	request.type=TYPE_WAIT_FOR_SIGNAL;
-
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return 0x1108;
 	}
 
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,180);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_WAITFORSIGNAL *rbody=(REQUEST_CAPI_WAITFORSIGNAL*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_WAITFORSIGNAL);
+	UINT id=++msg_id;
 
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return 0x1108;
-	}
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_WAITFORSIGNAL);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_WAITFORSIGNAL;
+	rheader->message_id=id;
 
-	answer=(ANSWER*)buffer;
+	rheader->app_id=ApplID;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_WAITFORSIGNAL);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	return answer->data.ad_wait_for_signal.ret;
+	sendRequest(request);
+	free((void*)request);
+
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
+
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_WAITFORSIGNAL *abody=(ANSWER_CAPI_WAITFORSIGNAL*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_WAITFORSIGNAL))
+	{
+        free((void*)answer);
+		return 0x1108;
+	}	
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
+		return 0x1108;
+	}
+
+	return capi_error;
 }
 
 DWORD WINAPI waiting_proc_2(void* param)
 {
+	DWORD ApplID=(DWORD)param;
+
 	if(old_wait_for_signal!=NULL)
 	{
-		return old_wait_for_signal((DWORD)param);
+		return old_wait_for_signal(ApplID);
 	}
 
 	return 0x1108;
@@ -1175,45 +1065,59 @@ void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer)
 
 	szBuffer[0]=0;
 
-	char buffer[512];
-	DWORD err;
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return;
 	}
 
-	SOCKADDR_IN to;
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_MANUFACTURER *rbody=(REQUEST_CAPI_MANUFACTURER*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_MANUFACTURER);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_MANUFACTURER);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_MANUFACTURER;
+	rheader->message_id=id;
+
+	rheader->app_id=0;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_MANUFACTURER);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	sendRequest(request);
+	free((void*)request);
 
-	ANSWER *answer;
-	REQUEST request;
-	request.type=TYPE_GET_MANUFACTURER;
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
 
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_MANUFACTURER *abody=(ANSWER_CAPI_MANUFACTURER*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_MANUFACTURER))
+	{
+        free((void*)answer);
+		return;
+	}	
+
+	memcpy(szBuffer,abody->manufacturer,64);	// copy data to the result
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
 		return;
 	}
-	
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return;
-	}
 
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return;
-	}
-
-	answer=(ANSWER*)buffer;
-
-	memcpy(szBuffer,answer->data.ad_get_manufacturer.szBuffer,64);
-	
-//	return answer->data.ad_get_manufacturer.ret;
+	return;
 }
 
 DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
@@ -1226,49 +1130,62 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 		return old_get_version(pCAPIMajor, pCAPIMinor, pManufacturerMajor, pManufacturerMinor);
 	}
 
-	char buffer[512];
-	DWORD err;
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return 0x1108;
 	}
 
-	SOCKADDR_IN to;
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_VERSION *rbody=(REQUEST_CAPI_VERSION*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_VERSION);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_VERSION);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_VERSION;
+	rheader->message_id=id;
+
+	rheader->app_id=0;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_VERSION);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	sendRequest(request);
+	free((void*)request);
 
-	ANSWER *answer;
-	REQUEST request;
-	request.type=TYPE_GET_VERSION;
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
 
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_VERSION *abody=(ANSWER_CAPI_VERSION*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_VERSION))
+	{
+        free((void*)answer);
 		return 0x1108;
 	}
-
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	answer=(ANSWER*)buffer;
-
-	*pCAPIMajor=answer->data.ad_get_version.CAPIMajor;
-	*pCAPIMinor=answer->data.ad_get_version.CAPIMinor;
-	*pManufacturerMajor=answer->data.ad_get_version.ManufacturerMajor;
-	*pManufacturerMinor=answer->data.ad_get_version.MAnufacturerMinor;
 	
-	return answer->data.ad_get_version.ret;
+	*pCAPIMajor=abody->driver.major;
+	*pCAPIMinor=abody->driver.minor;
+	*pManufacturerMajor=abody->manufacturer.major;
+	*pManufacturerMinor=abody->manufacturer.minor;
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
+		return 0x1108;
+	}
+
+	return capi_error;
 }
 
 DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
@@ -1280,51 +1197,66 @@ DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 
 	szBuffer[0]=0;
 
-	char buffer[512];
-	DWORD err;
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return 0x1108;
 	}
 
-	SOCKADDR_IN to;
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_SERIAL *rbody=(REQUEST_CAPI_SERIAL*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_SERIAL);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_SERIAL);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_SERIAL;
+	rheader->message_id=id;
+
+	rheader->app_id=0;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_SERIAL);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	sendRequest(request);
+	free((void*)request);
 
-	ANSWER *answer;
-	REQUEST request;
-	request.type=TYPE_GET_SERIAL_NUMBER;
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
 
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_SERIAL *abody=(ANSWER_CAPI_SERIAL*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_SERIAL))
+	{
+        free((void*)answer);
+		return 0x1108;
+	}	
+
+	memcpy(szBuffer,abody->serial,8);		// Copy the serial to the result
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
 		return 0x1108;
 	}
 
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return 0x1108;
-	}
-
-	answer=(ANSWER*)buffer;
-
-	memcpy(szBuffer,answer->data.ad_get_serial_number.szBuffer,8);
-	
-	return answer->data.ad_get_serial_number.ret;
+	return capi_error;
 }
 
 DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 								DWORD CtrlNr)
 {
 	DWORD err;
+	((char*)szBuffer)[0]=0; //I don't think we need this
 
 	if(CtrlNr>remote_controllers)		// request for a local controller
 	{
@@ -1351,47 +1283,62 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 		}
 	}
 	
-	//((char*)szBuffer)[0]=0; I don't think we need this
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
+		return 0x1108;
+	}
+
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_PROFILE *rbody=(REQUEST_CAPI_PROFILE*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PROFILE);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_PROFILE);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_PROFILE;
+	rheader->message_id=id;
+
+	rheader->app_id=0;
+	rheader->controller_id=CtrlNr;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PROFILE);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	char buffer[512];
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
-		return 0x1108;
-	}
+	sendRequest(request);
+	free((void*)request);
 
-	SOCKADDR_IN to;
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
+
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_PROFILE *abody=(ANSWER_CAPI_PROFILE*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_PROFILE))
+	{
+        free((void*)answer);
+		return 0x1108;
+	}	
+
+	memcpy(szBuffer,abody->profile,64);		// copy the profile to the result
+	*((UINT*)szBuffer)=controllers;		// Set the number of returned controllers to the real number of controller we got
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
-
-	ANSWER *answer;
-	REQUEST request;
-	request.data.rd_get_profile.CtrlNr=CtrlNr;
-	request.type=TYPE_GET_PROFILE;
-
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return 0x1108;
-	}
-
-	answer=(ANSWER*)buffer;
-
-	memcpy(szBuffer,answer->data.ad_get_profile.szBuffer,64);
 	
-	return answer->data.ad_get_profile.ret;
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
+		return 0x1108;
+	}
+
+	return capi_error;
 }
 
 DWORD APIENTRY CAPI_INSTALLED(void)
@@ -1404,42 +1351,55 @@ DWORD APIENTRY CAPI_INSTALLED(void)
 	}
 
 	
-	char buffer[512];
-	DWORD err;
-
-	SOCKET socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,0);
-	if(socke==INVALID_SOCKET){
+	char* request=(char*)malloc(_MSG_BUFFER);
+	if(request==NULL)
+	{
 		return 0x1108;
 	}
 
-	SOCKADDR_IN to;
+	REQUEST_HEADER *rheader=(REQUEST_HEADER*)request;
+	REQUEST_CAPI_INSTALLED *rbody=(REQUEST_CAPI_INSTALLED*)(request+sizeof(REQUEST_HEADER));
+	char* rdata=request+sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_INSTALLED);
+	UINT id=++msg_id;
+
+	rheader->header_len=sizeof(REQUEST_HEADER);
+	rheader->body_len=sizeof(REQUEST_CAPI_INSTALLED);
+	rheader->data_len=0;
+	rheader->message_type=TYPE_CAPI_INSTALLED;
+	rheader->message_id=id;
+
+	rheader->app_id=0;
+	rheader->session_id=session_id;
+
+	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_INSTALLED);
+	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	to.sin_addr=toaddr;
-	to.sin_family=AF_INET;
-	to.sin_port=htons(7103);
+	sendRequest(request);
+	free((void*)request);
 
-	ANSWER *answer;
-	REQUEST request;
-	request.type=TYPE_INSTALLED;
+	char* answer; // The pointer that will point to the answer
+	waitForAnswer(id,&answer);
+	// when the function terminates we are sure to have received a message
 
-	err=SocketSendTo(socke,(LPCTSTR)&request,sizeof(REQUEST),0,(SOCKADDR*)&to,sizeof(SOCKADDR_IN),2);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
+
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_INSTALLED *abody=(ANSWER_CAPI_INSTALLED*)(answer+aheader->header_len);
+	char* adata=answer+aheader->header_len+aheader->body_len;
+
+	if(!verifyMessage(answer,TYPE_CAPI_INSTALLED))
+	{
+        free((void*)answer);
+		return 0x1108;
+	}	
+
+	DWORD capi_error=aheader->capi_error;
+	UINT proxy_error=aheader->proxy_error;
+	free((void*)answer);
+
+	if(proxy_error!=PERROR_NONE)
+	{
 		return 0x1108;
 	}
 
-	err=SocketReceiveFrom(socke,buffer,512,0,NULL,NULL,10);
-	if((err==SOCKET_ERROR) || (err==0)){
-		closesocket(socke);
-		return 0x1108;
-	}
-
-	err=closesocket(socke);
-	if(err==SOCKET_ERROR){
-		return 0x1108;
-	}
-
-	answer=(ANSWER*)buffer;
-	
-	return answer->data.ad_installed.ret;
+	return capi_error;
 }
