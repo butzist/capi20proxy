@@ -3,7 +3,7 @@
 
 #include "stdafx.h"
 #include "capi20server.h"
-#include "../protocol.h"
+#include "protocol.h"
 
 
 SERVICE_STATUS          ServiceStatus; 
