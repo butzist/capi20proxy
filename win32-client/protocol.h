@@ -16,7 +16,10 @@
 
 /* The CVS log:
  * $Log$
- * Revision 1.6  2002/03/29 07:52:32  butzist
+ * Revision 1.7  2002/05/12 07:06:10  butzist
+ * updated
+ *
+ * Revision 1.6  2002/03/29 07:52:06  butzist
  * seems to work (got problems with DATA_B3)
  *
  * Revision 1.5  2002/03/21 15:16:42  butzist
@@ -74,8 +77,6 @@
 #define AUTH_NO_AUTH	0x0000
 #define AUTH_BY_IP		0x0001	// auth
 #define	AUTH_USERPASS	0x0002
-#define	AUTH_RSA		0x0100	// encryption for get/put message
-#define	AUTH_BLOWFISH	0x0200
 
 /// define types:
 
@@ -93,6 +94,7 @@
 #define TYPE_PROXY_AUTH			98
 #define TYPE_PROXY_KEEPALIVE	97
 #define TYPE_PROXY_SHUTDOWN		96
+#define TYPE_PROXY_FEATURE		95
 
 
 const char *revision="$Revision$";
@@ -111,6 +113,7 @@ struct REQUEST_PROXY_HELO {  // type number: 99
 };
 
 struct REQUEST_PROXY_AUTH {  // type number: 98
+ unsigned long auth_type;   // authentication type desired
  unsigned auth_len;
 };
 
@@ -168,7 +171,6 @@ struct ANSWER_PROXY_HELO {  // type number: 99
 };
 
 struct ANSWER_PROXY_AUTH {  // type number: 98
- unsigned long auth_type;   // authentication type desired
  unsigned auth_len;   // length of authentication data
 };
 

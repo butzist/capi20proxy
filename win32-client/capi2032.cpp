@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.18  2002/08/16 18:29:37  butzist
+ * added regitry entry "port"
+ *
  * Revision 1.17  2002/05/14 13:24:15  butzist
  * changed and recompiled
  * hope this works better
@@ -205,6 +208,110 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 	return TRUE;
 }
 
+// Authentication
+void do_auth(DWORD authtypes)
+{
+	DWORD type=AUTH_NO_AUTH;
+	DWORD data_len=0;
+	DWORD err;
+
+	char* msg=(char*)malloc(_MSG_BUFFER);
+	if(msg==NULL)
+	{
+		return;
+	}
+
+	REQUEST_HEADER *header=(REQUEST_HEADER*)msg;
+	REQUEST_PROXY_AUTH *body=(REQUEST_PROXY_AUTH*)(msg+sizeof(REQUEST_HEADER));
+	char* data=msg+sizeof(REQUEST_HEADER)+sizeof(REQUEST_PROXY_AUTH);
+
+	if(authtypes & AUTH_BY_IP) {
+		type=AUTH_BY_IP;
+	}
+
+	if((!type) && (authtypes & AUTH_USERPASS)) {
+		char user[256];
+		char pass[256];
+		DWORD len;
+		HKEY key;
+
+		err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\The Red Guy\\capi20proxy",0,KEY_QUERY_VALUE,&key);
+		if(err==ERROR_SUCCESS){
+		
+			len=256;
+			err=RegQueryValueEx(key,"auth_user",NULL,NULL,(unsigned char*)user,&len);
+			if(err==ERROR_SUCCESS){
+				len=256;
+				err=RegQueryValueEx(key,"auth_pass",NULL,NULL,(unsigned char*)pass,&len);
+				if(err==ERROR_SUCCESS){
+					strcpy(data,user);
+					data+=strlen(user)+1;
+					strcpy(data,pass);
+					data_len=strlen(user)+strlen(pass)+2;
+				}
+			}
+		}
+		RegCloseKey(key);
+	}
+
+	header->header_len=sizeof(REQUEST_HEADER);
+	header->body_len=sizeof(REQUEST_PROXY_AUTH);
+	header->data_len=data_len;
+	header->message_type=TYPE_PROXY_AUTH;
+	header->message_id=++msg_id;
+
+	body->auth_type=type;
+
+	header->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_PROXY_HELO);
+
+	err=send(socke,msg,header->message_len,0);
+	if(err!=header->message_len)
+	{
+		closesocket(socke);
+		free((void*)msg);
+		return;
+	}
+
+	err=recv(socke,msg,_MSG_BUFFER,0);
+	if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
+	{
+		closesocket(socke);
+		free((void*)msg);
+		return;
+	}
+
+	UINT len=err;
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)msg;
+	ANSWER_PROXY_AUTH *abody=(ANSWER_PROXY_AUTH*)(msg+aheader->header_len);
+	char* adata=msg+aheader->header_len+aheader->body_len;
+
+	if(aheader->header_len+aheader->body_len+aheader->data_len!=len ||	aheader->message_len!=len)
+	{
+		// invalid lengths
+		closesocket(socke);
+		free((void*)msg);
+		return;
+	}
+
+	if(aheader->proxy_error>0x01)
+	{
+		// proxy error
+		closesocket(socke);
+		free((void*)msg);
+		return;
+	}
+
+	if(aheader->message_type!=TYPE_PROXY_AUTH)
+	{
+		// wrong message type
+		closesocket(socke);
+		free((void*)msg);
+		return;
+	}
+
+	free(msg);
+}
+
 // The "main" function, the message dispatcher
 
 DWORD initConnection()
@@ -299,16 +406,16 @@ DWORD initConnection()
 		return 8;
 	}
 
-	if(aheader->proxy_error==PERROR_AUTH_REQUIRED || AUTH_DESIRED)
-	{
-		// do_auth(abody->auth_supported);
-	}
-
 	max_timeout=abody->timeout;
 	// NYI
 
 	session_id=aheader->session_id;
 	
+	if(aheader->proxy_error==PERROR_AUTH_REQUIRED || AUTH_DESIRED)
+	{
+		do_auth(abody->auth_type);
+	}
+
 	free(msg);
 
 	status=1;
