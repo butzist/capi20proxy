@@ -42,8 +42,8 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/Makefile linux-2.4.19-capi20proxy
  
 diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20proxy/drivers/isdn/avmb1/capi20proxy.c
 --- linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-capi20proxy/drivers/isdn/avmb1/capi20proxy.c	Tue Sep 10 23:13:34 2002
-@@ -0,0 +1,884 @@
++++ linux-2.4.19-capi20proxy/drivers/isdn/avmb1/capi20proxy.c	Fri Sep 13 20:39:33 2002
+@@ -0,0 +1,904 @@
 +/*
 + *   capi20proxy linux client module (Provides a remote CAPI port over TCP/IP)
 + *   Copyright (c) 2002. Begumisa Gerald & Adam Szalkowski. All rights reserved
@@ -252,10 +252,15 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +{
 +	struct sk_buff *skb;
 +
-+	spin_lock(&(card->ctrl_lock));
-+	while ((skb = skb_dequeue(&(card->outgoing_queue))) != 0)
++	printk(KERN_NOTICE "%s: flushing queue\n", DRIVERNAME);
++	
++	/*while (card->outgoing_queue.next!=NULL){*/
++	while(card->outgoing_queue.qlen) {
++		skb = skb_dequeue(&(card->outgoing_queue));
 +		kfree_skb(skb);
-+
++	}
++	
++	spin_lock(&(card->ctrl_lock));
 +	card->sk_pending = 0;
 +	spin_unlock(&(card->ctrl_lock));
 +}
@@ -282,8 +287,12 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	subcommand = TYPE_SHUTDOWN;
 +	command = TYPE_PROXY;
 +	len = sizeof(__u16)*2 + sizeof(__u8)*2;
-+	skb = alloc_skb(len+1, GFP_ATOMIC);
-+
++	if(!(skb = alloc_skb(len + 1, GFP_ATOMIC))) {
++		printk(KERN_ERR "%s card %d: Could not allocate memory\n", DRIVERNAME, ctrl->cnr);
++		return;
++	}
++	skb->len=len;
++	
 +	CAPIMSG_SETLEN(skb->data, len);
 +	CAPIMSG_SETAPPID(skb->data, appl);
 +	CAPIMSG_SETCOMMAND(skb->data, command);
@@ -311,18 +320,21 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +{
 +	struct sk_buff *skb;
 +	__u16 len;
-+	__u8 subcommand = TYPE_REGISTER_APP; /* Command to daemon to throw together a register
-+				    	      * kind of packet to send to the server
-+				    	      */
-+	__u8 command = TYPE_PROXY;	/* Tells the daemon this is not an ordinary message */
-+
-+	appl=0;
++	__u8 subcommand = TYPE_REGISTER_APP;
++	/* Command to daemon to throw together a register
++	 * kind of packet to send to the server
++	 */
 +	
++	__u8 command = TYPE_PROXY;
++	/* Tells the daemon this is not an ordinary message */
++
 +	len = sizeof(__u16)*2 + sizeof(__u8)*2 + sizeof(__u32)*3;
 +	if(!(skb = alloc_skb(len + 1, GFP_ATOMIC))) {
-+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: Could not allocate memory\n", DRIVERNAME, ctrl->cnr);
 +		return;
 +	}
++	skb->len=len;
++	
 +	CAPIMSG_SETLEN(skb->data, len);
 +	CAPIMSG_SETAPPID(skb->data, appl);
 +	CAPIMSG_SETCOMMAND(skb->data, command);
@@ -340,9 +352,9 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 +	capi_register_params arp;
 +
-+	if(card->status!=CARD_RUNNING)
++	if(card->status==CARD_FREE)
 +	{
-+		printk(KERN_ERR "%s card %d: Tried to register application on not running controller", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: Tried to register application on free controller\n", DRIVERNAME, ctrl->cnr);
 +		(*ctrl->appl_released)(ctrl,appl);
 +		return;
 +	}
@@ -353,7 +365,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	}
 +	
 +	arp.datablkcnt = (rp->datablkcnt > CAPI_MAXDATAWINDOW) ? CAPI_MAXDATAWINDOW : rp->datablkcnt;	
-+	arp.datablklen = (rp->datablklen > 1024) ? 1024 : rp->datablklen;	/* why did you write '<' ? */
++	arp.datablklen = (rp->datablklen > 1024) ? 1024 : rp->datablklen;
 +	arp.level3cnt  = rp->level3cnt;
 +
 +	capiproxy_register_internal(ctrl, appl, &arp);
@@ -413,9 +425,11 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +
 +	len = sizeof(__u16)*2 + sizeof(__u8)*2;
 +	if(!(skb = alloc_skb(len+1, GFP_ATOMIC))) {
-+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: Could not allocate memory\n", DRIVERNAME, ctrl->cnr);
 +		return;
 +	}
++	skb->len=len;
++	
 +        CAPIMSG_SETLEN(skb->data, len);
 +        CAPIMSG_SETAPPID(skb->data, appl);
 +        CAPIMSG_SETCOMMAND(skb->data, command);
@@ -430,9 +444,11 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 +	__u16 applid;
 +
-+	if(card->status!=CARD_RUNNING)
++	printk(KERN_NOTICE "%s card %d: message received from kcapi\n", DRIVERNAME, ctrl->cnr);
++
++	if(card->status==CARD_FREE)
 +	{
-+		printk(KERN_ERR "%s card %d: message for not running card dropped", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: message for free card dropped\n", DRIVERNAME, ctrl->cnr);
 +		kfree_skb(skb);
 +		return;
 +	}
@@ -452,7 +468,6 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	card->sk_pending += 1;
 +	spin_unlock(&(card->ctrl_lock));
 +
-+	printk(KERN_NOTICE "%s card %d: message received from kcapi", DRIVERNAME, ctrl->cnr);
 +	
 +#ifndef NOTASK
 +	queue_task(&tq_send_notify, &tq_immediate);
@@ -519,7 +534,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +static void push_user_buffer(void *dest, void **src, int len)
 +{
 +	copy_from_user(dest, *src, len);
-+	*src += len; 
++	((char*)*src) += len; 
 +}
 +
 +int capiproxy_ioctl(struct inode *inode, 
@@ -530,8 +545,11 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	char *temp = (char *)ioctl_param;
 +	capi20proxy_card *card = (capi20proxy_card *)file->private_data;
 +	struct capi_ctr *ctrl  = card->ctrl;
-+	__u16 appl, len;
-+
++	__u16 appl;
++	int len;
++	
++	printk(KERN_NOTICE "%s card %d: ioctl()\n", DRIVERNAME, ctrl->cnr);
++	
 +	switch(ioctl_num) {
 +		case IOCTL_SET_DATA:
 +		{
@@ -540,7 +558,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +
 +			copy_from_user(&len, temp, sizeof(int));
 +			temp += sizeof(int);
-+
++			
 +			if (len < CAPI_MANUFACTURER_LEN + (sizeof(struct capi_version)) + CAPI_SERIAL_LEN + (sizeof(struct capi_profile)))
 +				return -EMSGSIZE;
 +
@@ -556,9 +574,10 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +			push_user_buffer((void *)(&(ctrl->profile)),
 +					(void **)(&temp),
 +					sizeof(struct capi_profile));
++			
 +			(*ctrl->ready)(ctrl);
 +			card->status=CARD_RUNNING;
-+			printk(KERN_NOTICE "%s card %d: controller ready", DRIVERNAME, ctrl->cnr);
++			printk(KERN_NOTICE "%s card %d: controller ready\n", DRIVERNAME, ctrl->cnr);
 +			return 0;
 +		}
 +		case IOCTL_ERROR_REGFAIL:
@@ -566,7 +585,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +			appl=(__u16)ioctl_param;			
 +			APPL_MARK_REVOKED(card,appl);
 +			(*ctrl->appl_released)(ctrl, appl);
-+			printk(KERN_NOTICE "%s card %d: deamon failed to register application %d", DRIVERNAME, ctrl->cnr, appl);
++			printk(KERN_NOTICE "%s card %d: deamon failed to register application %d\n", DRIVERNAME, ctrl->cnr, appl);
 +			return 0;
 +		}
 +		case IOCTL_APPL_REGISTERED:
@@ -575,7 +594,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +			(*ctrl->appl_registered)(ctrl, appl);
 +			APPL_MARK_CONFIRMED(card,appl);
 +			//INC_MOD_USE_COUNT;
-+			printk(KERN_NOTICE "%s card %d: daemon confirmed application %d", DRIVERNAME, ctrl->cnr, appl);
++			printk(KERN_NOTICE "%s card %d: daemon confirmed application %d\n", DRIVERNAME, ctrl->cnr, appl);
 +			return 0;
 +		}
 +		default:
@@ -653,10 +672,10 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +		skb_queue_head(&card->outgoing_queue,skb);
 +		return -EMSGSIZE;
 +	}
-+
++	
 +	if(skb->len < 6) {
 +		/* message ist too short take the next one */
-+		printk(KERN_WARNING "%s: too short message dropped", DRIVERNAME);
++		printk(KERN_WARNING "%s: too short message dropped\n", DRIVERNAME);
 +		return capiproxy_read(file,buffer,length,offset);
 +	}
 +		
@@ -664,10 +683,10 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	appl = CAPIMSG_APPID(skb->data);
 +
 +	/*
-+	 * If this is a valid capi message (the subcommand wouldn't be zero)
++	 * If this is a valid capi message (the command wouldn't be zero)
 +	 * then we check on the application in question
 +	 */
-+	if (CAPIMSG_COMMAND(skb->data)) {
++	if (CAPIMSG_COMMAND(skb->data)!=TYPE_PROXY) {
 +		switch(APPL(card,appl)) {
 +			case APPL_WAITING:
 +				skb_queue_head(&card->outgoing_queue,skb);
@@ -685,7 +704,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	retval = copy_to_user(buffer, skb->data, skb->len);
 +	if(retval) {
 +		skb_queue_head(&card->outgoing_queue,skb);
-+		printk(KERN_ERR "%s: error %x in copy_to_user()", DRIVERNAME, retval);
++		printk(KERN_ERR "%s: error %x in copy_to_user()\n", DRIVERNAME, retval);
 +		return retval;
 +	}
 +	copied = skb->len;
@@ -715,15 +734,15 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +
 +	if(card->status!=CARD_RUNNING)
 +	{
-+		printk(KERN_ERR "%s card %d: Card not ready to receive messages", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: Card not ready to receive messages\n", DRIVERNAME, ctrl->cnr);
 +		return -1;
 +	}
 +
-+	/* don't we get the length from the legth parameter? */
 +	if(!(skb = alloc_skb(length+1, GFP_ATOMIC))) {
-+		printk(KERN_ERR "%s card %d: Could not allocate memory", DRIVERNAME, ctrl->cnr);
++		printk(KERN_ERR "%s card %d: Could not allocate memory\n", DRIVERNAME, ctrl->cnr);
 +		return -1;
 +	}
++	skb->len=length;
 +	
 +	writepos = skb_put(skb, length);
 +	copy_from_user(writepos, buffer, length); 
@@ -783,13 +802,14 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	ctrl = card->ctrl;
 +	id = capiproxy_find_free_id();
 +	if(id == -1) {
-+		printk(KERN_ERR "%s: no free controllers left", DRIVERNAME);
++		printk(KERN_ERR "%s: no free controllers left\n", DRIVERNAME);
 +		return -1;
 +	}
 +
 +	card=&cards[id];
 +
 +	capiproxy_init_appls(card);
++	capiproxy_flush_queue(card);
 +	
 +	card->status = CARD_NOT_READY;
 +	skb_queue_head_init(&card->outgoing_queue);
@@ -805,7 +825,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	spin_unlock(&kernelcapi_lock);
 +
 +	file->private_data = (void*)card;
-+	MOD_INC_USE_COUNT;
++	//MOD_INC_USE_COUNT;
 +	return 0;
 +}   
 +
@@ -817,7 +837,7 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	card = (capi20proxy_card *)file->private_data;
 +	ctrl = card->ctrl;
 +
-+	printk(KERN_NOTICE "%s: removing Controller %d", DRIVERNAME, ctrl->cnr);
++	printk(KERN_NOTICE "%s: removing Controller %d\n", DRIVERNAME, ctrl->cnr);
 +	
 +	(*ctrl->suspend_output)(ctrl);
 +	capiproxy_flush_queue(card);
@@ -831,8 +851,8 @@ diff -Nru linux-2.4.19-orig/drivers/isdn/avmb1/capi20proxy.c linux-2.4.19-capi20
 +	 * Should we unregister all apps?
 +	 */
 +
-+	printk(KERN_NOTICE "%s: Controller %d released", DRIVERNAME, ctrl->cnr);
-+	MOD_DEC_USE_COUNT;
++	printk(KERN_NOTICE "%s: Controller %d released\n", DRIVERNAME, ctrl->cnr);
++	//MOD_DEC_USE_COUNT;
 +	return 0;
 +}
 +
