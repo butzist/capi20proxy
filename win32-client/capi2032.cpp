@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.8  2002/03/29 22:13:50  butzist
+ * added version information resource
+ * made it finally work(!!!)
+ * on telephony it lacks performance so you don't understand very much
+ *
  * Revision 1.7  2002/03/29 07:52:32  butzist
  * seems to work (got problems with DATA_B3)
  *
@@ -43,10 +48,9 @@
 #include "capi2032.h"
 
 #define VERSION_MAJOR	1
-#define VERSION_MINOR	1
+#define VERSION_MINOR	2
 
-
-LPVOID GlobalBuffer=NULL;
+#define ILLEGAL_ANSWER		((char*)(void*)-1)
 
 IN_ADDR toaddr;
 
@@ -57,9 +61,10 @@ SOCKET socke;
 int max_timeout=-1, timeout=0;
 HANDLE receiver;
 evlhash* hash_start=NULL;
-CRITICAL_SECTION hash_mutex, socket_mutex, dispatch_mutex;
+appl_list* registered_apps=NULL;
+CRITICAL_SECTION hash_mutex, socket_mutex, dispatch_mutex, appllist_mutex;
 UINT session_id=0;
-int onhash=0;
+
 
 BOOL APIENTRY DllMain( HANDLE hModule, 
                        DWORD  ul_reason_for_call, 
@@ -105,6 +110,7 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 		InitializeCriticalSection(&hash_mutex);
 		InitializeCriticalSection(&socket_mutex);
 		InitializeCriticalSection(&dispatch_mutex);
+		InitializeCriticalSection(&appllist_mutex);
 
 		DWORD thid;
 		receiver=CreateThread(NULL,1024,messageDispatcher,NULL,0,&thid);
@@ -118,49 +124,39 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 	case DLL_PROCESS_DETACH:
 
-		if(GlobalBuffer!=NULL) free(GlobalBuffer);
-
 		shutdown(socke,SD_RECEIVE);
-		if(WaitForSingleObject(receiver,5000)!=WAIT_OBJECT_0)
+		if(WaitForSingleObject(receiver,2000)!=WAIT_OBJECT_0)
 		{
 			closesocket(socke);
-			TerminateThread(receiver,1);
 		} else {
 			closesocket(socke);
+	
+			if(WaitForSingleObject(receiver,1000)!=WAIT_OBJECT_0)
+			{
+				TerminateThread(receiver,1);
+			}
 		}
+
+		while(hash_start!=NULL)
+		{
+			*(hash_start->data)=ILLEGAL_ANSWER;
+			hash_start=hash_start->next;
+		}
+
+		Sleep(500);
+
+		while(getfirst_app(&registered_apps));		// free allocated memory in the list
 
 		DeleteCriticalSection(&hash_mutex);
 		DeleteCriticalSection(&socket_mutex);
 		DeleteCriticalSection(&dispatch_mutex);
+		DeleteCriticalSection(&appllist_mutex);
 
 		WSACleanup();
 		break;
 	}
 	return TRUE;
 }
-
-UINT msgGetApplId(char* _msg)
-{
-	return (*((UINT*)(_msg+2)));
-}
-
-void msgSetApplId(char* _msg, UINT _applid)
-{
-	 *((UINT*)(_msg+2))=_applid;
-}
-
-unsigned char msgGetController(char* _msg)
-{
-	return ((unsigned char) ((*((DWORD*)(_msg+8))) & 0x7F));
-}
-
-void msgSetController(char* _msg, unsigned char _ctrl)
-{
-	DWORD& ncci=(*((DWORD*)(_msg+8)));
-	ncci &=  0xFFFFFF80;
-	ncci += _ctrl;
-}
-
 
 // The "main" function, the message dispatcher
 
@@ -285,8 +281,6 @@ DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 {
 	evlhash* queue=hash_start;
 
-	++onhash;
-
 	EnterCriticalSection(&hash_mutex);
 	if(queue)
 	{
@@ -326,8 +320,6 @@ DWORD removeFromHash(UINT _msgId)
 {
 	evlhash* queue=hash_start;
 	evlhash* prev=NULL;
-
-	--onhash;
 
 	EnterCriticalSection(&hash_mutex);
 	while(queue)
@@ -391,6 +383,144 @@ char** getDataPtrFromMsgId(UINT _msgId)
 
 	LeaveCriticalSection(&hash_mutex);
 	return NULL;
+}
+
+void add_app(DWORD _ApplID, appl_list** _list)
+{
+	EnterCriticalSection(&appllist_mutex);
+
+	if(*_list!=NULL)
+	{
+		appl_list* list=(*_list);
+		while(list->next)
+		{
+			list=list->next;
+		}
+
+		list->next=(appl_list*)malloc(sizeof(appl_list));
+		
+		list=list->next;
+		list->ApplID=_ApplID;
+		list->next=NULL;
+		list->data=NULL;
+	} else {
+		(*_list)=(appl_list*)malloc(sizeof(appl_list));
+		(*_list)->ApplID=_ApplID;
+		(*_list)->next=NULL;
+		(*_list)->data=NULL;
+	}
+
+	LeaveCriticalSection(&appllist_mutex);
+}
+
+void del_app(DWORD _ApplID, appl_list** _list)
+{
+	EnterCriticalSection(&appllist_mutex);
+
+	if((*_list)!=NULL)
+	{
+		appl_list* list=(*_list);
+		appl_list* prev=NULL;
+		
+		while(list!=NULL)
+		{
+			if(list->ApplID==_ApplID)
+			{
+				if(prev!=NULL)
+				{
+					prev->next=list->next;
+				} else {
+					(*_list)=list->next;
+				}
+				
+				if(list->data!=NULL)
+				{
+					GlobalFree(list->data);
+				}
+
+				free((void*)list);
+				
+				LeaveCriticalSection(&appllist_mutex);
+				return;
+			}
+			prev=list;
+			list=list->next;
+		}
+	}
+
+	LeaveCriticalSection(&appllist_mutex);
+}
+
+DWORD getfirst_app(appl_list** _list)
+{
+	EnterCriticalSection(&appllist_mutex);
+
+	if((*_list)==NULL)
+	{
+		LeaveCriticalSection(&appllist_mutex);
+		return 0;
+	} else {
+		appl_list* list=(*_list);
+		DWORD ret=list->ApplID;
+
+		(*_list)=list->next;
+
+		if(list->data!=NULL)
+		{
+			GlobalFree(list->data);
+		}
+		
+		free((void*)list);
+		
+		LeaveCriticalSection(&appllist_mutex);
+		return ret;
+	}
+	
+	LeaveCriticalSection(&appllist_mutex);
+}
+
+void* getdata_app(DWORD _ApplID, appl_list* list)
+{
+	EnterCriticalSection(&appllist_mutex);
+
+	while(list!=NULL)
+	{
+		if(list->ApplID==_ApplID)
+		{
+			LeaveCriticalSection(&appllist_mutex);
+			return list->data;
+		}
+		list=list->next;
+	}
+
+	LeaveCriticalSection(&appllist_mutex);
+	return NULL;
+}
+
+void setdata_app(DWORD _ApplID, appl_list* list, void* _data)
+{
+	EnterCriticalSection(&appllist_mutex);
+
+	while(list!=NULL)
+	{
+		if(list->ApplID==_ApplID)
+		{
+			if(list->data!=NULL)
+			{
+				GlobalFree(list->data);
+			}
+
+			list->data=_data;
+			
+			LeaveCriticalSection(&appllist_mutex);
+			return;
+		}
+		list=list->next;
+	}
+
+	//error (entry for _ApplID not found)
+	GlobalFree(_data); // so at least we don't produce memory leaks
+	LeaveCriticalSection(&appllist_mutex);
 }
 
 bool verifyMessage(char* msg, UINT type)
@@ -533,7 +663,7 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -558,6 +688,11 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	if(proxy_error!=PERROR_NONE)
 	{
 		return 0x1108;
+	}
+
+	if(capi_error==0x0000)
+	{
+		add_app(*pApplID,&registered_apps);
 	}
 
 	return capi_error;
@@ -593,7 +728,7 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -616,6 +751,11 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	if(proxy_error!=PERROR_NONE)
 	{
 		return 0x1108;
+	}
+
+	if(capi_error==0x0000)
+	{
+		del_app(ApplID,&registered_apps);
 	}
 
 	return capi_error;
@@ -654,8 +794,8 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 	memcpy(rdata,data1,len1);	// copy the CAPI message to the message
 	rheader->data_len+=len1;	// add the CAPI message length to the data_length
 
-	unsigned char cmd1=data1[4];
-	unsigned char cmd2=data1[5];
+	unsigned char cmd1=CAPI_CMD1(data1);
+	unsigned char cmd2=CAPI_CMD2(data1);
 
 	if((cmd1==0x86) && (cmd2==0x80)) // If we got a DATA_B3 REQUEST
 	{
@@ -676,7 +816,7 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -736,7 +876,7 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -758,25 +898,24 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 		return 0x1108;
 	}
 
-	if(GlobalBuffer!=NULL) GlobalFree(GlobalBuffer);
 	// This App is written to deal with only one App....
 	// For multiple Applications we must implement a GlobalBuffer for each Application
-	GlobalBuffer=GlobalAlloc(GPTR,aheader->data_len);
-	if(GlobalBuffer==NULL)
+	void* buffer=GlobalAlloc(GPTR,aheader->data_len);
+	if(buffer==NULL)
 	{
 		return 0x1108;
 	}
-	memcpy(GlobalBuffer,adata,aheader->data_len);
+	memcpy(buffer,adata,aheader->data_len);
 
-	memcpy(&len1,GlobalBuffer,2);		// get the length of the CAPI message
+	memcpy(&len1,buffer,2);		// get the length of the CAPI message
 	if(aheader->data_len<len1) // data too short
 	{
 		free((void*)answer);
 		return 0x1108;
 	}
 
-	unsigned char cmd1=((char*)GlobalBuffer)[4];
-	unsigned char cmd2=((char*)GlobalBuffer)[5];
+	unsigned char cmd1=CAPI_CMD1(buffer);
+	unsigned char cmd2=CAPI_CMD2(buffer);
 
 	if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
 	{
@@ -785,13 +924,15 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 			return 0x1108;
 		}
 		
-		memcpy(&len2,((char*)GlobalBuffer)+16,2);	// get the lengtzh of the data
+		memcpy(&len2,((char*)buffer)+16,2);	// get the lengtzh of the data
 
-		DWORD pointer=(DWORD)GlobalBuffer+len1;		// data is appended to the message
-		memcpy(((char*)GlobalBuffer)+12,&pointer,4);
+		DWORD pointer=(DWORD)buffer+len1;		// data is appended to the message
+		memcpy(((char*)buffer)+12,&pointer,4);
 	}
 
-	*ppCAPIMessage=GlobalBuffer;
+	*ppCAPIMessage=buffer;
+
+	setdata_app(ApplID,registered_apps,buffer);
 
 	DWORD capi_error=aheader->capi_error;
 	UINT proxy_error=aheader->proxy_error;
@@ -835,7 +976,7 @@ DWORD APIENTRY CAPI_WAIT_FOR_SIGNAL(DWORD ApplID)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -893,7 +1034,7 @@ void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return;
 	}
@@ -956,7 +1097,7 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -1019,7 +1160,7 @@ DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -1081,7 +1222,7 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}
@@ -1141,7 +1282,7 @@ DWORD APIENTRY CAPI_INSTALLED(void)
 	sendAndReceive(id,request,&answer);
 	// when the function terminates we have received a message
 
-	if(answer==NULL)	// or maybe not
+	if(answer==ILLEGAL_ANSWER)	// or maybe not
 	{
 		return 0x1108;
 	}

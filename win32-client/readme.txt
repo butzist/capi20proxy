@@ -8,10 +8,10 @@ DESCRIPTION
   without having an ISDN card installed. These services are provided by a
   server (Win32/Linux/Unix) whith an ISDN card installed  
 AUTHOR
-  Adam Szalkowski (adam(at)szalkowski.de)
+  Adam Szalkowski (adam@szalkowski.de)
   inspired by Christian Haas
 REPORTING BUGS
-  Please! adam(at)szalkowski.de
+  Please! adam@szalkowski.de
 COPYRIGHT
 This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

@@ -1,7 +1,46 @@
+/*
+ *   capi20proxy win32 client (Provides a remote CAPI port over TCP/IP)
+ *   Copyright (C) 2002  Adam Szalkowski <adam@szalkowski.de>
+ *
+ *   This program is free software; you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation; either version 2 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program; if not, write to the Free Software
+ *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ */
+
+/*
+ * $Log$
+ */
+
+/*
+    main header for capi2032.dll
+*/
+
 #define AUTH_DESIRED		0
 
 #define __PORT	6674
 #define	_MSG_BUFFER	10000
+
+#define APPL_ID(msg)	(*((UINT*)(((char*)msg)+2)))
+#define CAPI_NCCI(msg)	(*((DWORD*)(((char*)msg)+8)))
+#define CAPI_CMD1(msg)	(*((unsigned char*)(((char*)msg)+4)))
+#define CAPI_CMD2(msg)	(*((unsigned char*)(((char*)msg)+5)))
+
+void inline SET_CTRL(char* _msg, unsigned char _ctrl)
+{
+	DWORD& ncci=CAPI_NCCI(_msg);
+	ncci &=  0xFFFFFF80;
+	ncci += _ctrl;
+}
 
 struct TOParams{
 	DWORD Milliseconds;
@@ -136,11 +175,31 @@ int abodysize(UINT type)
 	}
 }
 
+struct appl_list
+{
+	appl_list* next;
+	DWORD ApplID;
+	void* data;
+};
 
 
 DWORD initConnection();
 DWORD shutdownConnection();
 DWORD WINAPI messageDispatcher(LPVOID param);
-DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer, DWORD CtrlNr);
-DWORD APIENTRY CAPI_RELEASE(DWORD ApplID);
 
+DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize, DWORD maxLogicalConnection, DWORD maxBDataBlocks, DWORD maxBDataLen, DWORD *pApplID);
+DWORD APIENTRY CAPI_RELEASE(DWORD ApplID);
+DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID, LPVOID pCAPIMessage);
+DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage);
+DWORD APIENTRY CAPI_WAIT_FOR_SIGNAL(DWORD ApplID);
+void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer);
+DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor, DWORD * pCAPIMinor, DWORD * pManufacturerMajor, DWORD * pManufacturerMinor);
+DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer);
+DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer, DWORD CtrlNr);
+DWORD APIENTRY CAPI_INSTALLED(void);
+
+void add_app(DWORD _ApplID, appl_list** _list);
+void del_app(DWORD _ApplID, appl_list** _list);
+DWORD getfirst_app(appl_list** _list);
+void* getdata_app(DWORD _ApplID, appl_list* list);
+void setdata_app(DWORD _ApplID, appl_list* list, void* _data);
