@@ -123,7 +123,7 @@ BEGIN
     LTEXT           "A name for this client. Will be used in future for logging etc.",
                     IDC_STATIC,11,82,106,21
     GROUPBOX        "name",IDC_STATIC,7,52,114,55
-    EDITTEXT        IDC_PORT,261,63,104,14,ES_CENTER | ES_AUTOHSCROLL
+    EDITTEXT        IDC_PORT,261,63,104,14,ES_AUTOHSCROLL | ES_NUMBER
     LTEXT           "The port on the server to connect to (default: 6674)",
                     IDC_STATIC,259,82,106,21
     GROUPBOX        "port",IDC_STATIC,255,52,114,55
@@ -178,7 +178,7 @@ IDI_ICON                ICON    DISCARDABLE     "icon1.ico"
 STRINGTABLE DISCARDABLE 
 BEGIN
     IDS_NAME                "CAPI 2.0 Proxy client"
-    IDS_DESC                "Configuration plugin for the CAPI 2.0 Proxy client. You dant have to use regedit any more ;-)"
+    IDS_DESC                "Configuration plugin for the CAPI 2.0 Proxy client. You don't have to use regedit any more ;-)"
 END
 
 #endif    // Deutsch (Deutschland) resources
