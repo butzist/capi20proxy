@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.12  2002/04/11 09:01:23  butzist
+ * only some minor bugs
+ *
  * Revision 1.11  2002/04/09 16:28:09  butzist
  * show the console again before quitting (so the user can see the errors and close it)
  *
