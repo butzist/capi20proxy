@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.9  2002/04/08 20:45:14  butzist
+ * voice communication performance improved
+ * global buffer now for each registered application
+ * still hangs sometimes
+ *
  * Revision 1.8  2002/03/29 22:13:50  butzist
  * added version information resource
  * made it finally work(!!!)
@@ -51,7 +56,7 @@
 #define VERSION_MINOR	2
 
 #define ILLEGAL_ANSWER		((char*)(void*)-1)
-
+#define _WAITFORMESSAGE_TIMEOUT		3000
 IN_ADDR toaddr;
 
 int status=0;
@@ -105,7 +110,10 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		RegCloseKey(key);
 
-		initConnection();
+		if(initConnection()!=NO_ERROR)
+		{
+			return FALSE;
+		}
 
 		InitializeCriticalSection(&hash_mutex);
 		InitializeCriticalSection(&socket_mutex);
@@ -114,6 +122,10 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		DWORD thid;
 		receiver=CreateThread(NULL,1024,messageDispatcher,NULL,0,&thid);
+		if(receiver==NULL)
+		{
+			return FALSE;
+		}
 		break;
  
 	case DLL_THREAD_ATTACH:
@@ -277,7 +289,7 @@ DWORD sendRequest(char* msg)
 	return err;
 }
 
-DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
+DWORD addToHash(UINT _msgId, char** _data)
 {
 	evlhash* queue=hash_start;
 
@@ -309,7 +321,6 @@ DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 	queue->next=NULL;
 
 	queue->msgId=_msgId;
-	queue->thread=_thread;
 	queue->data=_data;
 
 	LeaveCriticalSection(&hash_mutex);
@@ -343,26 +354,6 @@ DWORD removeFromHash(UINT _msgId)
 	
 	LeaveCriticalSection(&hash_mutex);
 	return 0;
-}
-
-HANDLE getThreadFromMsgId(UINT _msgId)
-{
-	evlhash* queue=hash_start;
-
-	EnterCriticalSection(&hash_mutex);
-	while(queue)
-	{
-		if(queue->msgId==_msgId)
-		{
-			HANDLE thread=queue->thread;
-			LeaveCriticalSection(&hash_mutex);
-			return thread;
-		}
-		queue=queue->next;
-	}
-
-	LeaveCriticalSection(&hash_mutex);
-	return NULL;
 }
 
 char** getDataPtrFromMsgId(UINT _msgId)
@@ -568,14 +559,28 @@ bool verifyMessage(char* msg, UINT type)
 
 DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 {
-	HANDLE thread;
-	DuplicateHandle(GetCurrentProcess(),GetCurrentThread(),GetCurrentProcess(),&thread,0,FALSE,DUPLICATE_SAME_ACCESS);
+	DWORD err;
+
 	*answer=NULL;
-	addToHash(msgId,answer,thread);
-	sendRequest(request);
+	addToHash(msgId,answer);
+	err=sendRequest(request);
+
+	if((err==0) || (err==SOCKET_ERROR))
+	{
+		*answer=ILLEGAL_ANSWER;
+		return SOCKET_ERROR;
+	}
 	
+	UINT timeout=0;
+
 	while(*answer==NULL)
 	{
+		if(++timeout>_WAITFORMESSAGE_TIMEOUT)
+		{
+			*answer=ILLEGAL_ANSWER;
+			break;
+		}
+
 		Sleep(1);	// Ok, the "beautiful" method didn't work :-( brute force RULZ!
 	}
 
@@ -586,7 +591,6 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 void dispatchMessage(char* msg)
 {
 	ANSWER_HEADER *header=(ANSWER_HEADER*)msg;
-	HANDLE thread=getThreadFromMsgId(header->message_id);
 	char** data=getDataPtrFromMsgId(header->message_id);
 
 	removeFromHash(header->message_id);
@@ -608,10 +612,10 @@ DWORD WINAPI messageDispatcher(LPVOID param)
 		err=recv(socke,(char*)msg,_MSG_BUFFER,0);
 		if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
 		{
-			if(err==0)
-				break;
-
 			free(msg);
+
+			if(err==0 || err==SOCKET_ERROR)
+				return SOCKET_ERROR;		// if the socket has been shut down or an error occurs we quit
 		} else {
 			dispatchMessage((char*)msg);
 		}
