@@ -1,0 +1,223 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// Deutsch (Deutschland) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_DEU)
+#ifdef _WIN32
+LANGUAGE LANG_GERMAN, SUBLANG_GERMAN
+#pragma code_page(1252)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#define _AFX_NO_SPLITTER_RESOURCES\r\n"
+    "#define _AFX_NO_OLE_RESOURCES\r\n"
+    "#define _AFX_NO_TRACKER_RESOURCES\r\n"
+    "#define _AFX_NO_PROPERTY_RESOURCES\r\n"
+    "\r\n"
+    "#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_DEU)\r\n"
+    "#ifdef _WIN32\r\n"
+    "LANGUAGE 7, 1\r\n"
+    "#pragma code_page(1252)\r\n"
+    "#endif //_WIN32\r\n"
+    "#include ""res\\CPL.rc2""  // Nicht mit Microsoft Visual C++ bearbeitete Ressourcen\r\n"
+    "#include ""l.deu\\afxres.rc""          // Standardkomponenten\r\n"
+    "#endif\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+#ifndef _MAC
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,6,0,4
+ PRODUCTVERSION 0,6,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x2L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040704b0"
+        BEGIN
+            VALUE "Comments", "\0"
+            VALUE "CompanyName", "capi20proxy.sourceforge.net\0"
+            VALUE "FileDescription", "capi20proxy client control panel plugin\0"
+            VALUE "FileVersion", "0, 6, 0, 4\0"
+            VALUE "InternalName", "CPL\0"
+            VALUE "LegalCopyright", "Copyright (C) 2002\0"
+            VALUE "LegalTrademarks", "\0"
+            VALUE "OriginalFilename", "capi20proxy.cpl\0"
+            VALUE "PrivateBuild", "\0"
+            VALUE "ProductName", "CPL Dynamic Link Library\0"
+            VALUE "ProductVersion", "0, 6, 0, 0\0"
+            VALUE "SpecialBuild", "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x407, 1200
+    END
+END
+
+#endif    // !_MAC
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_MAINDIALOG DIALOGEX 0, 0, 376, 250
+STYLE DS_SYSMODAL | DS_MODALFRAME | DS_CENTERMOUSE | WS_POPUP | WS_VISIBLE | 
+    WS_CAPTION | WS_SYSMENU
+CAPTION "CAPI 2.0 Proxy client configuration"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,324,6,45,14
+    PUSHBUTTON      "Abbrechen",IDCANCEL,324,24,45,14
+    EDITTEXT        IDC_LOGFILE,13,62,104,14,ES_AUTOHSCROLL
+    CONTROL         1004,IDC_STATIC,"Static",SS_BITMAP,84,6,172,38
+    LTEXT           "A path and filename for the logfile of the server",
+                    IDC_STATIC,11,82,106,21
+    GROUPBOX        "logfile",IDC_STATIC,5,52,120,63
+    EDITTEXT        IDC_PORT,261,63,104,14,ES_AUTOHSCROLL | ES_NUMBER
+    LTEXT           "The TCP port where the server will wait for clients (default: 6674)",
+                    IDC_STATIC,259,82,106,21
+    GROUPBOX        "port",IDC_STATIC,250,52,120,63
+    LTEXT           "The IP address the server will listen on. (0.0.0.0 for listening on any address)",
+                    IDC_STATIC,135,82,106,27
+    GROUPBOX        "binding",IDC_STATIC,130,52,115,63
+    CONTROL         "IPAddress2",IDC_IPADDRESS,"SysIPAddress32",WS_TABSTOP,
+                    136,62,104,14,WS_EX_TRANSPARENT
+    CONTROL         "List1",IDC_USERS,"SysListView32",LVS_REPORT | 
+                    LVS_SINGLESEL | LVS_NOLABELWRAP | WS_BORDER | WS_TABSTOP,
+                    5,130,120,100
+    CONTROL         "List1",IDC_HOSTS_ALLOW,"SysListView32",LVS_REPORT | 
+                    LVS_SINGLESEL | LVS_NOLABELWRAP | WS_BORDER | WS_TABSTOP,
+                    130,130,115,100
+    CONTROL         "List1",IDC_HOSTS_DENY,"SysListView32",LVS_REPORT | 
+                    LVS_SINGLESEL | LVS_NOLABELWRAP | WS_BORDER | WS_TABSTOP,
+                    250,130,120,100
+    PUSHBUTTON      "x",IDC_BUTTON1,5,230,10,10
+    EDITTEXT        IDC_EDIT1,25,230,45,10,ES_AUTOHSCROLL
+    EDITTEXT        IDC_EDIT2,71,230,45,10,ES_AUTOHSCROLL
+    PUSHBUTTON      "+",IDC_BUTTON2,115,230,10,10
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    IDD_MAINDIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 369
+        TOPMARGIN, 6
+        BOTTOMMARGIN, 243
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_LOGO                BITMAP  DISCARDABLE     "logo.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON                ICON    DISCARDABLE     "icon1.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE DISCARDABLE 
+BEGIN
+    IDS_NAME                "CAPI 2.0 Proxy server"
+    IDS_DESC                "Configuration plugin for the CAPI 2.0 Proxy server"
+END
+
+#endif    // Deutsch (Deutschland) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+#define _AFX_NO_SPLITTER_RESOURCES
+#define _AFX_NO_OLE_RESOURCES
+#define _AFX_NO_TRACKER_RESOURCES
+#define _AFX_NO_PROPERTY_RESOURCES
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_DEU)
+#ifdef _WIN32
+LANGUAGE 7, 1
+#pragma code_page(1252)
+#endif //_WIN32
+#include "res\CPL.rc2"  // Nicht mit Microsoft Visual C++ bearbeitete Ressourcen
+#include "l.deu\afxres.rc"          // Standardkomponenten
+#endif
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

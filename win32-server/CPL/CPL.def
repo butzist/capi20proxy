@@ -1,0 +1,4 @@
+DESCRIPTION "CAPI 2.0 Proxy control panel plugin"
+
+EXPORTS
+CPlApplet
