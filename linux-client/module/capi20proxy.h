@@ -1,3 +1,5 @@
+#include "/usr/src/linux/drivers/isdn/avmb1/capiutil.h"
+
 /* exportetd constants to include for daemons */
 
 #define CAPIPROXY_MAXCONTR	4
@@ -39,3 +41,14 @@
  */
 
 #define ENOTREG			1 /* Controller not registered */
+
+/* capiutil extensions */
+
+#define CAPIMSG_SETL3C(m, lev)		capimsg_setu32(m, 6, lev) 
+#define CAPIMSG_SETDBC(m, dbc)		capimsg_setu32(m, 10, dbc)
+#define	CAPIMSG_SETDBL(m, dbl)		capimsg_setu32(m, 14, dbl)
+
+#define CAPIMSG_L3C(m)	CAPIMSG_U32(m, 6)
+#define CAPIMSG_DBC(m)	CAPIMSG_U32(m, 10)
+#define CAPIMSG_DBL(m)	CAPIMSG_U32(m, 14)
+
