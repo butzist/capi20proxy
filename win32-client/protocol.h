@@ -1,14 +1,25 @@
 /*
-CAPI_REGISTER
-CAPI_RELEASE
-CAPI_PUT_MESSAGE
-CAPI_GET_MESSAGE
-CAPI_WAIT_FOR_SIGNAL
-CAPI_GET_MANUFACTURER
-CAPI_GET_VERSION
-CAPI_GET_SERIAL_NUMBER
-CAPI_GET_PROFILE
-CAPI_INSTALLED
+*   capi20proxy (Provides a remote CAPI port over TCP/IP)
+*   Copyright (C) 2002  Adam Szalkowski <adam@szalkowski.de>
+*
+*   This program is free software; you can redistribute it and/or modify
+*   it under the terms of the GNU General Public License as published by
+*   the Free Software Foundation; either version 2 of the License, or
+*   (at your option) any later version.
+*
+*   This program is distributed in the hope that it will be useful,
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+*   GNU General Public License for more details.
+*
+*   You should have received a copy of the GNU General Public License
+*   along with this program; if not, write to the Free Software
+*   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*/
+
+
+/*
+    Declarations of protocol structs
 */
 
 enum DATA_TYPE
