@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.4  2002/04/08 20:45:14  butzist
+ * voice communication performance improved
+ * global buffer now for each registered application
+ * still hangs sometimes
+ *
  */
 
 /*
@@ -60,7 +65,6 @@ struct evlhash
 
 	DWORD msgId;
 	char** data;
-	HANDLE thread;
 };
 
 inline LPVOID malloc(size_t _size)
