@@ -4,5 +4,3 @@ capifwd_SOURCES = capifwd.c appindex.c unix.c auth/auth.c capi/getmessage.c capi
 	capi/putmessage.c capi/release.c capi/version.c config/cmdline.c protocol.h capifwd.h
 capifwd_LDADD = -lcapi20
 
-man_MANS = capifwd.8
-
