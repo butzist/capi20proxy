@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.10  2002/04/09 14:32:00  butzist
+ * works now quite fine
+ * added timeout when receiving answer form server
+ * handeled some more exceptions :-)
+ *
  * Revision 1.9  2002/04/08 20:45:14  butzist
  * voice communication performance improved
  * global buffer now for each registered application
@@ -56,7 +61,7 @@
 #define VERSION_MINOR	2
 
 #define ILLEGAL_ANSWER		((char*)(void*)-1)
-#define _WAITFORMESSAGE_TIMEOUT		3000
+#define _WAITFORMESSAGE_TIMEOUT		5000
 IN_ADDR toaddr;
 
 int status=0;
@@ -69,7 +74,6 @@ evlhash* hash_start=NULL;
 appl_list* registered_apps=NULL;
 CRITICAL_SECTION hash_mutex, socket_mutex, dispatch_mutex, appllist_mutex;
 UINT session_id=0;
-
 
 BOOL APIENTRY DllMain( HANDLE hModule, 
                        DWORD  ul_reason_for_call, 
@@ -524,7 +528,7 @@ bool verifyMessage(char* msg, UINT type)
 		return false;
 	}
 
-	if(aheader->body_len<(unsigned int)abodysize(type))
+	if(aheader->body_len+1<(unsigned int)abodysize(type))
 	{
 		//  too short body
 		return false;
@@ -546,6 +550,11 @@ bool verifyMessage(char* msg, UINT type)
 	{
 		// proxy error
 		return false;
+	}
+
+	if(aheader->capi_error!=0x0000)
+	{
+		return true;
 	}
 
 	if(aheader->message_type!=type)
@@ -578,6 +587,7 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 		if(++timeout>_WAITFORMESSAGE_TIMEOUT)
 		{
 			*answer=ILLEGAL_ANSWER;
+			removeFromHash(msgId);
 			break;
 		}
 
@@ -610,6 +620,7 @@ DWORD WINAPI messageDispatcher(LPVOID param)
 		}
 
 		err=recv(socke,(char*)msg,_MSG_BUFFER,0);
+
 		if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
 		{
 			free(msg);
@@ -902,8 +913,6 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 		return 0x1108;
 	}
 
-	// This App is written to deal with only one App....
-	// For multiple Applications we must implement a GlobalBuffer for each Application
 	void* buffer=GlobalAlloc(GPTR,aheader->data_len);
 	if(buffer==NULL)
 	{
