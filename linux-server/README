@@ -1,0 +1,40 @@
+
+CAPI 2.0 Proxy Project, 
+  capifwd Server for Linux. 
+
+
+1. What is capifwd/CAPI 2.0 Proxy?
+ CAPI 2.0 Proxy is a set of programs for forwarding CAPI ISDN commands
+ over a TCP/IP capable network. This can be used to share ISDN devices 
+ over a network to provide e.g. fax, internet or voice services.
+
+1.1. Status of the Project
+ The project was founded in early 2002 by Adam Szalkowski and as of 
+ August 2002 development versions of the MS Windows Client and Server 
+ as well as of the Linux Server are available. 
+ Development on the Linux Client module has been very active over the
+ past weeks and a first development snapshot will be ready soon. 
+
+2. Installing the Linux Server. 
+ First, be sure to have the latest version of CapiFwd either from 
+ sf.net/projects/capi20proxy or directly from CVS.
+ Also make sure to have libcapi installed, as this library is needed
+ by the server. I hope to be able to use kernelcapi instead in a 
+ future version but until then go visit www.capi4linux.org. 
+ Then, simply type 'cd src && make' at the command promt, a configure script
+ is not needed.
+ 
+3. Misc.
+ For support, questions or anything else (we don't sell drugs), send 
+ e-mail to capi20proxy-public@lists.sourceforge.net. 
+ You could also try to send e-mail to frlind@frlind.de or 
+ adam@szalkowski.de but we are so cool, we won't answer (maybe??).
+
+ (C)opyright 2002: Adam Szalkowski, Friedrich Lindenberg, Begumisa Gerald. 
+ All rights reserved. This program is released under the conditions of the 
+ GNU General Public License (GNU GPL) Version 2, or (at your option) any 
+ later version. 
+ This program is therefore provided WITHOUT ANY WARRANTY. By executing the
+ code you agree to execute it AT YOUR OWN RISK!
+
+

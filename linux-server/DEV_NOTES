@@ -1,0 +1,31 @@
+
+Notes on my code modification. 
+ (frlind, July 2?.) 
+
+
+ - I have broken up this monstrous main.c into some 
+   zillions of files. Maybe I've gone a bit tooooo far
+   by splitting up the capi functions. 
+
+ - I hope to implement ip-address-based auth very soon. 
+   This is while I have some hash functions in config/. 
+
+ - I will create some format of user/password thing in 
+   the config file. this is what auth/ is intended to be. 
+   Let's talk about a format for clear-text password 
+   submission as a first step. 
+   I propose some king of struct: 
+
+   struct auth_upa {
+   	int username_len; 
+	int passwd_len;
+	char data[];
+   }
+
+   Ok?
+   Could you do this for meeee? Pleeease?
+
+ - Have fun. How far has development of the linux-client reached?
+   
+
+
