@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.7  2002/03/22 16:48:06  butzist
+ * just coded a little bit bt didn't finish
+ *
  * Revision 1.6  2002/03/21 15:16:42  butzist
  * started rewriting for new protocol
  *
@@ -35,9 +38,19 @@
 #include "capi20server.h"
 #include "protocol.h"
 
-#define __PORT	6674	// Fritzle's Telefonnummer
+#define __PORT	6674	// Fritzle's Telefonnummer :-)
 #define _MAX_SESSIONS	127
 #define _MSG_SIZE		10000
+#define _TIMEOUT		-1		// no timeout
+
+#define	_VERSION_MAJOR	1
+#define _VERSION_MINOR	1
+
+const __version_t	_SERVER_VERSION = { _VERSION_MAJOR, _VERSION_MINOR };
+const char* _SERVER_NAME = "CAPI 2.0 Proxy Win32 Server";
+
+const unsigned long _AUTH_TYPES = AUTH_NO_AUTH;
+const bool	_AUTH_REQUIRED = false;
 
 const char* LOGFILE="c:\\winnt\\capi20proxy.log";
 
@@ -47,6 +60,8 @@ int run,pause,debug,recv_threads;
 FILE *f;
 HANDLE RunningThread;
 DWORD session=0;
+SOCKET sockets[_MAX_SESSIONS];
+SOCKET socke;
 
 HANDLE Router;
 
@@ -68,7 +83,7 @@ void DebugOut(char* msg,BOOL type_error){
 int main(int argc, char* argv[])
 { 
 	RunningThread=0;
-	debug=0;
+	debug=1; // change to 0
 
 	for(int i=1;i<argc;i++) {
 		if(strcmp(argv[i],"-debug")==0){
@@ -76,6 +91,12 @@ int main(int argc, char* argv[])
 			f=NULL;
 		}
 	}
+
+	for(i=0; i<_MAX_SESSIONS; i++) // init sockets for the sessions
+	{
+		sockets[i]=INVALID_SOCKET;
+	}
+
 	
 	// open file for debug output
 	if(debug==0) f=fopen(LOGFILE,"a+t");
@@ -293,8 +314,8 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 					continue;
 				}
 
-				DWORD sess=allocSession(socke);
-				if(sess==0)
+				int sess=allocSession(connection);
+				if(sess==-1)
 				{
 					DebugOut("ServiceMain(): no free session Ids",FALSE);
 					continue;
@@ -314,8 +335,28 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
    return; 
 }
 
+int allocSession(SOCKET socke)
+{
+	for(int i=0; i<_MAX_SESSIONS; i++)
+	{
+		if(sockets[i]==INVALID_SOCKET)
+		{
+			sockets[i]=socke;
+			return i;
+		}
+	}
+	return 0;
+}
 
-DWORD exec_capi_register(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,char* rdata)
+void freeSession(int sess)
+{
+	if(sess>=_MAX_SESSIONS) return;
+
+	sockets[sess]=INVALID_SOCKET;
+}
+
+
+DWORD exec_capi_register(REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,char* rdata, client_data* client)
 {
 	char answer[_MSG_SIZE];
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -327,24 +368,25 @@ DWORD exec_capi_register(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_REGIS
 	aheader->data_len=0;
 	aheader->message_type=TYPE_CAPI_REGISTER;
 	aheader->message_id=rheader->message_id;
-	aheader->session_id=rheader->session_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
 
+	// the applId is a unsigned long!!!!! Fitzle, du hast es wieder versaut	
 	aheader->capi_error=CAPI_REGISTER(rbody->messageBufferSize,
 		rbody->maxLogicalConnection,
 		rbody->maxBDataBlocks,
 		rbody->maxBDataLen,
 		&(aheader->app_id));
 
-	aheader->proxy_error=PERROR_NO_ERROR;
-
-	return send(socke,answer,aheader->message_len,0);
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_release(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_RELEASE* rbody,char* rdata)
+DWORD exec_capi_release(REQUEST_HEADER* rheader,REQUEST_CAPI_RELEASE* rbody,char* rdata, client_data* client)
 {
 	char answer[_MSG_SIZE];
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
-	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_RELEASE*)(answer+sizeof(ANSWER_HEADER));
+	ANSWER_CAPI_RELEASE *abody=(ANSWER_CAPI_RELEASE*)(answer+sizeof(ANSWER_HEADER));
 	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_RELEASE);
 
 	aheader->header_len=sizeof(ANSWER_HEADER);
@@ -352,20 +394,20 @@ DWORD exec_capi_release(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_RELEAS
 	aheader->data_len=0;
 	aheader->message_type=TYPE_CAPI_RELEASE;
 	aheader->message_id=rheader->message_id;
-	aheader->session_id=rheader->session_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
 
 	aheader->capi_error=CAPI_RELEASE(rheader->app_id);
 
-	aheader->proxy_error=PERROR_NO_ERROR;
-
-	return send(socke,answer,aheader->message_len,0);
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_putmessage(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbody,char* rdata)
+DWORD exec_capi_putmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbody,char* rdata, client_data* client)
 {
 	char answer[_MSG_SIZE];
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
-	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_PUTMESSAGE*)(answer+sizeof(ANSWER_HEADER));
+	ANSWER_CAPI_PUTMESSAGE *abody=(ANSWER_CAPI_PUTMESSAGE*)(answer+sizeof(ANSWER_HEADER));
 	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_PUTMESSAGE);
 
 	aheader->header_len=sizeof(ANSWER_HEADER);
@@ -373,13 +415,14 @@ DWORD exec_capi_putmessage(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_PUT
 	aheader->data_len=0;
 	aheader->message_type=TYPE_CAPI_PUTMESSAGE;
 	aheader->message_id=rheader->message_id;
-	aheader->session_id=rheader->session_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
 
 	if(rheader->data_len<8) // data too short
 	{
 		aheader->proxy_error=PERROR_PARSE_ERROR;
 	} else {
-		UINT len1;
+		UINT len1=0;
 		memcpy(&len1,rdata,2);		// get the length of the CAPI message
 
 		if(rheader->data_len<len1) // data too short
@@ -389,14 +432,14 @@ DWORD exec_capi_putmessage(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_PUT
 			unsigned char cmd1=rdata[4];
 			unsigned char cmd2=rdata[5];
 
-			if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
+			if((cmd1==0x86) && (cmd2==0x80))	// If we got a DATA_B3 REQ
 			{
 				if(len1<18)
 				{
 					aheader->proxy_error=PERROR_PARSE_ERROR;
 				} else {
                     UINT len2;
-					memcpy(&len2,rdata+16,2);	// get the lengtzh of the data
+					memcpy(&len2,rdata+16,2);	// get the length of the data
 					
 					if(len1+len2>rheader->data_len)
 					{
@@ -404,73 +447,333 @@ DWORD exec_capi_putmessage(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_PUT
 					} else {
 						DWORD pointer=(DWORD)rdata+len1;		// data is appended to the message
 						memcpy(rdata+12,&pointer,4);
-						aheader->proxy_error=PERROR_NO_ERROR;
-						
-						// call the CAPI function
-						aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
 					}
 				}
+			}
+			// call the CAPI function
+			aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
+		}
+	}
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
+}
+
+DWORD exec_capi_getmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_GETMESSAGE* rbody,char* rdata, client_data* client)
+{
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_GETMESSAGE *abody=(ANSWER_CAPI_GETMESSAGE*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_GETMESSAGE);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_GETMESSAGE);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_GETMESSAGE;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	char* message;
+
+	if((aheader->capi_error=CAPI_GET_MESSAGE(rheader->app_id,(LPVOID*) &message))==0x0000)
+	{
+		UINT len1=0;
+		memcpy(&len1,message,2);		// get the length of the CAPI message
+
+		memcpy(adata,message,len1);		// copy the message to the answer
+		aheader->data_len=len1;
+
+		unsigned char cmd1=adata[4];
+		unsigned char cmd2=adata[5];
+
+		if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
+		{
+			if(len1<18)
+			{
+				aheader->proxy_error=PERROR_PARSE_ERROR;
+			} else {
+                UINT len2=0;
+				memcpy(&len2,adata+16,2);	// get the length of the data
+				
+				DWORD pointer=0;
+				memcpy(&pointer,adata+12,4);	// get the start address of the data
+				
+				memcpy(adata+len1,(LPVOID)pointer,len2);	// append the data to the CAPI message
+
+				aheader->data_len+=len2;
 			}
 		}
 	}
 
-	// Here's where I stopped working :-)
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
+}
+
+DWORD WINAPI waiter(LPVOID param)
+{
+	waiter_data* data=(waiter_data*)param;
+	SOCKET socke=data->socket;
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_WAITFORSIGNAL *abody=(ANSWER_CAPI_WAITFORSIGNAL*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_WAITFORSIGNAL);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_WAITFORSIGNAL);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_WAITFORSIGNAL;
+	aheader->message_id=data->message_id;
+	aheader->session_id=data->session_id;
+	aheader->proxy_error=PERROR_NONE;
+
+	aheader->capi_error=CAPI_WAIT_FOR_SIGNAL(data->ApplID);	// call the CAPI function
+
+	myfree(param);
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
 	return send(socke,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_getmessage(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_GETMESSAGE* body,char* data)
+DWORD exec_capi_waitforsignal(REQUEST_HEADER* rheader,REQUEST_CAPI_WAITFORSIGNAL* rbody,char* rdata, client_data* client)
 {
+	waiter_data* data = (waiter_data*) mymalloc(sizeof(waiter_data));
 
+	data->socket=client->socket;
+	data->ApplID=rheader->app_id;
+	data->message_id=rheader->message_id;
+	data->session_id=client->session;
+	
+	DWORD thid;
+	if(CreateThread(NULL,1024,waiter,(LPVOID)data,0,&thid)==NULL)
+	{
+		char answer[_MSG_SIZE];
+		ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+		ANSWER_CAPI_WAITFORSIGNAL*abody=(ANSWER_CAPI_WAITFORSIGNAL*)(answer+sizeof(ANSWER_HEADER));
+		char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_WAITFORSIGNAL);
+
+		aheader->header_len=sizeof(ANSWER_HEADER);
+		aheader->body_len=sizeof(ANSWER_CAPI_WAITFORSIGNAL);
+		aheader->data_len=0;
+		aheader->message_type=TYPE_CAPI_WAITFORSIGNAL;
+		aheader->message_id=rheader->message_id;
+		aheader->session_id=client->session;
+		aheader->proxy_error=PERROR_NO_RESSOURCES;
+
+		aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+		send(client->socket,answer,aheader->message_len,0);
+
+		myfree((LPVOID)data);
+	}
+	return NO_ERROR;
 }
 
-DWORD exec_capi_waitforsignal(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_WAITFORSIGNAL* body,char* data)
-{
 
+DWORD exec_capi_manufacturer(REQUEST_HEADER* rheader,REQUEST_CAPI_MANUFACTURER* rbody,char* rdata, client_data* client)
+{
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_MANUFACTURER *abody=(ANSWER_CAPI_MANUFACTURER*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_MANUFACTURER);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_MANUFACTURER);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_MANUFACTURER;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	aheader->capi_error=CAPI_GET_MANUFACTURER(abody->manufacturer);		// call me Mr. CAPI, call me .... :-)
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_manufacturer(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_MANUFACTURER* body,char* data)
+DWORD exec_capi_version(REQUEST_HEADER* rheader,REQUEST_CAPI_VERSION* rbody,char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_VERSION *abody=(ANSWER_CAPI_VERSION*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_VERSION);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_VERSION);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_VERSION;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	// this cound be a problem for we need unsigned long (32bit) anfd Friedrich only imlemented 16bit in the protocol
+	// oh, Fritzle... warum hörst du nie auf mich... OK, let's try to truncate the return values
+
+	DWORD versions[4];
+
+	aheader->capi_error=CAPI_GET_VERSION(&versions[0],&versions[1],&versions[2],&versions[3]);
+	abody->driver.major=(UINT)versions[0];
+	abody->driver.minor=(UINT)versions[1];
+	abody->manufacturer.major=(UINT)versions[2];
+	abody->manufacturer.minor=(UINT)versions[3];
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_version(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_VERSION* body,char* data)
+DWORD exec_capi_serial(REQUEST_HEADER* rheader,REQUEST_CAPI_SERIAL* rbody,char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_SERIAL *abody=(ANSWER_CAPI_SERIAL*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_SERIAL);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_SERIAL);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_SERIAL;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	aheader->capi_error=CAPI_GET_SERIAL_NUMBER(abody->serial);		// calling the CAPI
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_serial(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_SERIAL* body,char* data)
+DWORD exec_capi_profile(REQUEST_HEADER* rheader,REQUEST_CAPI_PROFILE* rbody,char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_PROFILE *abody=(ANSWER_CAPI_PROFILE*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_PROFILE);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_PROFILE);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_PROFILE;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	aheader->capi_error=CAPI_GET_PROFILE(abody->profile,rheader->controller_id);
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_profile(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_PROFILE* body,char* data)
+DWORD exec_capi_installed(REQUEST_HEADER* rheader,REQUEST_CAPI_INSTALLED* rbody,char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_INSTALLED *abody=(ANSWER_CAPI_INSTALLED*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_INSTALLED);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_INSTALLED);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_INSTALLED;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	aheader->capi_error=CAPI_INSTALLED();
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_capi_installed(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_INSTALLED* body,char* data)
+DWORD exec_proxy_helo(REQUEST_HEADER* rheader, REQUEST_PROXY_HELO* rbody, char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_PROXY_HELO *abody=(ANSWER_PROXY_HELO*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_PROXY_HELO);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_PROXY_HELO);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_PROXY_HELO;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=0;
+	aheader->proxy_error=PERROR_NONE;
+
+	memcpy(client->name,rbody->name,64);
+	client->name[63]=0;
+
+	client->version=rbody->version;
+
+	aheader->app_id=0;
+	abody->auth_type=_AUTH_TYPES;
+	strcpy(abody->name,_SERVER_NAME);
+	abody->os=OS_TYPE_WINDOWS;
+	abody->timeout=_TIMEOUT;
+	abody->version=_SERVER_VERSION;
+
+	if(client->version.major<_SERVER_VERSION.major)
+	{
+		aheader->proxy_error=PERROR_INCOMPATIBLE_VERSION;
+	} else {
+		client->os=rbody->os;
+		aheader->session_id=client->session;
+	}
+	
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_proxy_helo(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_HELO* body,char* data)
+DWORD exec_proxy_keepalive(REQUEST_HEADER* rheader,REQUEST_PROXY_KEEPALIVE* rbody,char* rdata, client_data* client)
 {
-
+	// NYI
+	return NO_ERROR;
 }
 
-DWORD exec_proxy_keepalive(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_KEEPALVE* body,char* data)
+DWORD exec_proxy_auth(REQUEST_HEADER* rheader,REQUEST_PROXY_AUTH* rbody,char* rdata, client_data* client)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_PROXY_AUTH *abody=(ANSWER_PROXY_AUTH*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_PROXY_AUTH);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_PROXY_AUTH);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_PROXY_AUTH;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_AUTH_TYPE_NOT_SUPPORTED;
+
+	// NYI
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-DWORD exec_proxy_auth(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_AUTH* body,char* data)
+DWORD exec_proxy_shutdown(client_data* client,const char* message)
 {
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_PROXY_SHUTDOWN *abody=(ANSWER_PROXY_SHUTDOWN*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_PROXY_SHUTDOWN);
 
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_PROXY_SHUTDOWN);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_PROXY_SHUTDOWN;
+	aheader->message_id=0;
+	aheader->session_id=client->session;
+	aheader->proxy_error=PERROR_NONE;
+
+	strcpy(abody->reason,message);
+
+	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
+	return send(client->socket,answer,aheader->message_len,0);
 }
 
-bool verifyRequest(char* msg, UINT type)
+bool verifyRequest(char* msg)
 {
 	REQUEST_HEADER *header=(REQUEST_HEADER*)msg;
+	UINT type=header->message_type;
 
 	if(header->header_len<sizeof(REQUEST_HEADER))
 	{
@@ -496,12 +799,6 @@ bool verifyRequest(char* msg, UINT type)
 		return false;
 	}
 
-	if(header->proxy_error!=0x00)
-	{
-		// proxy error
-		return false;
-	}
-
 	if(header->message_type!=type)
 	{
 		// wrong message type
@@ -521,96 +818,165 @@ bool verifySessionId(char* msg, DWORD session)
 DWORD WINAPI StartSession(LPVOID param)
 {
 	DWORD err=1;
+	DWORD sess=(DWORD)param;
 	char request[_MSG_SIZE];
-	SOCKET socke=sockets[sess];
-	LPVOID auth_data;
-	UINT auth_type;
-	UINT auth_len;
-	char name[64];
+	client_data client;
 
-	do {
+	client.socket=sockets[sess];
+	client.auth_data=NULL;
+	client.auth_type=AUTH_NO_AUTH;
+	client.keepalive=_TIMEOUT;
+	client.session=session+sess;
+
+
+	while(true)
+	{
 		if(pause!=1)
 		{
-			err=recv(socke,request,_MSG_SIZE,0);	// blocking call
+			err=recv(client.socket,request,_MSG_SIZE,0);	// blocking call
 			if(err==0 || err==SOCKET_ERROR)
 			{
 				break;
 			}
 
-			verifyRequest(request);		// verify sizes
-			verifySessionId(request,session+sess);	// verify session_id
-
 			if(debug) DebugOut("ReceiverRequest(): Received Request",FALSE);
+
+			if(!verifyRequest(request))		// verify sizes
+			{
+				DebugOut("StartSession(): verifyRequest failed",FALSE);
+				continue;
+			}
+
 
 			REQUEST_HEADER *header=(REQUEST_HEADER*)request;
 			LPVOID body=(LPVOID)(request+header->header_len);
 			char* data=request+header->header_len+header->body_len;
 
-			switch(rheader->message_type)
+			switch(header->message_type)
 			{
 			case TYPE_CAPI_REGISTER:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_REGISTER",FALSE);
-				exec_capi_register(socke,header,(REQUEST_CAPI_REGISTER*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_register(header,(REQUEST_CAPI_REGISTER*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_RELEASE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_RELEASE",FALSE);
-				exec_capi_release(socke,header,(REQUEST_CAPI_RELEASE*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_release(header,(REQUEST_CAPI_RELEASE*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_PUTMESSAGE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PUTMESSAGE",FALSE);
-				exec_capi_putmessage(socke,header,(REQUEST_CAPI_PUTMESSAGE*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_putmessage(header,(REQUEST_CAPI_PUTMESSAGE*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_GETMESSAGE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_GETMESSAGE",FALSE);
-				exec_capi_getmessage(socke,header,(REQUEST_CAPI_GETMESSAGE*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_getmessage(header,(REQUEST_CAPI_GETMESSAGE*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_WAITFORSIGNAL:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_WAITFORSIGNAL",FALSE);
-				exec_capi_waitforsignal(socke,header,(REQUEST_CAPI_WAITFORSIGNAL*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_waitforsignal(header,(REQUEST_CAPI_WAITFORSIGNAL*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_MANUFACTURER:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_MANUFACTURER",FALSE);
-				exec_capi_manufacturer(socke,header,(REQUEST_CAPI_MANUFACTURER*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_manufacturer(header,(REQUEST_CAPI_MANUFACTURER*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_VERSION:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_VERSION",FALSE);
-				exec_capi_version(socke,header,(REQUEST_CAPI_VERSION*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_version(header,(REQUEST_CAPI_VERSION*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_SERIAL:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_SERIAL",FALSE);
-				exec_capi_serial(socke,header,(REQUEST_CAPI_SERIAL*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_serial(header,(REQUEST_CAPI_SERIAL*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_PROFILE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PROFILE",FALSE);
-				exec_capi_profile(socke,header,(REQUEST_CAPI_PROFILE*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_profile(header,(REQUEST_CAPI_PROFILE*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_CAPI_INSTALLED:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_INSTALLED",FALSE);
-				exec_capi_installed(socke,header,(REQUEST_CAPI_INSTALLED*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_capi_installed(header,(REQUEST_CAPI_INSTALLED*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_PROXY_HELO:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_HELO",FALSE);
-				exec_proxy_helo(socke,header,(REQUEST_PROXY_HELO*)body,data);
+				exec_proxy_helo(header,(REQUEST_PROXY_HELO*)body,data,&client);
 				break;
 
 			case TYPE_PROXY_KEEPALIVE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_KEEPALIVE",FALSE);
-				exec_proxy_keepaplive(socke,header,(REQUEST_PROXY_KEEPALIVE*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_proxy_keepalive(header,(REQUEST_PROXY_KEEPALIVE*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			case TYPE_PROXY_AUTH:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_AUTH",FALSE);
-				exec_proxy_auth(socke,header,(REQUEST_PROXY_AUTH*)body,data);
+				if(verifySessionId(request,session+sess))
+				{
+					exec_proxy_auth(header,(REQUEST_PROXY_AUTH*)body,data,&client);
+				} else {
+					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
+				}
 				break;
 
 			default:
@@ -621,16 +987,17 @@ DWORD WINAPI StartSession(LPVOID param)
 
 	if(err==0)
 	{
-		send_answer_proxy_shutdown(socke,session+sess,"Connection shutting down");
+		exec_proxy_shutdown(&client,"Connection shutting down");
 	} else {
-		send_answer_proxy_shutdown(socke,session+sess,"Socket Error");
+		exec_proxy_shutdown(&client,"Socket Error");
 	}
 
-	closesocket(socke);
+	closesocket(client.socket);
 	freeSession(sess);
+
+	return NO_ERROR;
 }	
  
-// Stub initialization function. 
 DWORD ServiceInitialization(DWORD argc, LPTSTR *argv,DWORD *specificError) 
 {
 	session+=0x10000;

@@ -1,19 +1,3 @@
-extern "C" {
-	typedef DWORD	(*c_register)(DWORD,DWORD,DWORD,DWORD,DWORD*);
-	typedef DWORD	(*c_release)(DWORD);
-	typedef DWORD	(*c_put_message)(DWORD,LPVOID);
-	typedef DWORD	(*c_get_message)(DWORD,LPVOID*);
-	typedef DWORD	(*c_wait_for_signal)(DWORD);
-	typedef void	(*c_get_manufacturer)(char*);
-	typedef DWORD	(*c_get_version)(DWORD*,DWORD*,DWORD*,DWORD*);
-	typedef DWORD	(*c_get_serial)(char*);
-	typedef DWORD	(*c_get_profile)(LPVOID,DWORD);
-    typedef DWORD	(*c_installed)(void);
-}
-
-#define MAX_CONTROLLERS		127
-#define MAX_APPLICATIONS	256
-
 #define AUTH_DESIRED		0
 
 #define __PORT	6674
@@ -154,7 +138,6 @@ int abodysize(UINT type)
 
 
 
-void initControllerNum();
 DWORD initConnection();
 DWORD shutdownConnection();
 DWORD WINAPI messageDispatcher(LPVOID param);

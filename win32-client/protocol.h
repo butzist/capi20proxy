@@ -16,6 +16,9 @@
 
 /* The CVS log:
  * $Log$
+ * Revision 1.5  2002/03/21 15:16:42  butzist
+ * started rewriting for new protocol
+ *
  * Revision 1.3  2002/03/09 16:58:52  frlind
  *
  * the new tcp/ip protocol-based protocol revision 2
@@ -38,9 +41,9 @@
 
 // Operating System types
 
-#define OS_TYPE_WINDOWS 1
-#define OS_TYPE_LINUX 2
-#define OS_TYPE_GENERIC 0
+#define OS_TYPE_WINDOWS	1
+#define OS_TYPE_LINUX	2
+#define OS_TYPE_GENERIC	0
 
 
 // Proxy error/warning codes
@@ -50,46 +53,50 @@
 #define PERROR_AUTH_REQUIRED	0x01	// indicate that you should use authentification (only for use in ANSWER_PROXY_HELO)
 #define PERROR_WRONG_SESSION	0x02	// unknown session id, message lost
 #define	PERROR_ACCESS_DENIED	0x03	// message not processed, because of lack of access rights
-#define PERROR_UNKNOWN_APP	0x04	// unknown/illegal ApplId in the message
-#define PERROR_UNKNOWN_CTRL	0x05	// unknown/illegal ControllerId in the message
+#define PERROR_UNKNOWN_APP		0x04	// unknown/illegal ApplId in the message
+#define PERROR_UNKNOWN_CTRL		0x05	// unknown/illegal ControllerId in the message
+#define PERROR_PARSE_ERROR		0x06	// error in message structure
+#define PERROR_AUTH_TYPE_NOT_SUPPORTED	0x07;
+#define PERROR_INCOMPATIBLE_VERSION	0x08;
 
-#define PERROR_NO_RECOURCES	0x80	// necessary resources not available
+#define PERROR_NO_RESSOURCES			0x80	// necessary resources not available
 #define PERROR_CRITICAL_INTERNAL_ERROR	0x81	// server must shut down
-#define PERROR_SOCKET_ERROR	0x82	// maybe try to resend the message
+#define PERROR_SOCKET_ERROR				0x82	// maybe try to resend the message
 #define PERROR_CRITICAL_SOCKET_ERROR	0x83	// must disconnect connection
 
 #define PERROR_CAPI_ERROR	0xff	// message not processed due to CAPI error
 
 // auth types
 
-#define AUTH_NO_AUTH	0x00
-#define AUTH_BY_IP		0x01
-#define	AUTH_USERPASS	0x02
-#define	AUTH_RSA		0x03
+#define AUTH_NO_AUTH	0x0000
+#define AUTH_BY_IP		0x0001	// auth
+#define	AUTH_USERPASS	0x0002
+#define	AUTH_RSA		0x0100	// encryption for get/put message
+#define	AUTH_BLOWFISH	0x0200
 
 /// define types:
 
-#define TYPE_CAPI_REGISTER  1
-#define TYPE_CAPI_RELEASE  2
-#define TYPE_CAPI_PUTMESSAGE 3
-#define TYPE_CAPI_GETMESSAGE 4
-#define TYPE_CAPI_WAITFORSIGNAL 5
-#define TYPE_CAPI_MANUFACTURER 6
-#define TYPE_CAPI_VERSION  7
-#define TYPE_CAPI_SERIAL  8
-#define TYPE_CAPI_PROFILE  9
-#define TYPE_CAPI_INSTALLED  10
-#define TYPE_PROXY_HELO   99
-#define TYPE_PROXY_AUTH   98
-#define TYPE_PROXY_KEEPALIVE 97
-#define TYPE_PROXY_SHUTDOWN  96
+#define TYPE_CAPI_REGISTER		1
+#define TYPE_CAPI_RELEASE		2
+#define TYPE_CAPI_PUTMESSAGE	3
+#define TYPE_CAPI_GETMESSAGE	4
+#define TYPE_CAPI_WAITFORSIGNAL	5
+#define TYPE_CAPI_MANUFACTURER	6
+#define TYPE_CAPI_VERSION		7
+#define TYPE_CAPI_SERIAL		8
+#define TYPE_CAPI_PROFILE		9
+#define TYPE_CAPI_INSTALLED		10
+#define TYPE_PROXY_HELO			99
+#define TYPE_PROXY_AUTH			98
+#define TYPE_PROXY_KEEPALIVE	97
+#define TYPE_PROXY_SHUTDOWN		96
 
 
 const char *revision="$Revision$";
 
 struct __version_t {
- unsigned major;  // major version for incompatible versions
- unsigned minor;  // minor version for compatible versions
+ unsigned long major;  // major version for incompatible versions
+ unsigned long minor;  // minor version for compatible versions
 };
 
 // CLIENT REQUESTS //
@@ -153,12 +160,12 @@ struct ANSWER_PROXY_HELO {  // type number: 99
  char name[64];    // some kind of name for the server (zero-terminated)
  int os;      // the operating system of the server
  struct __version_t version; // the version of the server
- int auth_supported[4];  // the server tells the client which auth-methods
- int timeout;
+ unsigned long auth_type;  // the server tells the client which auth-methods it supports (each bit represents one method) !changed!
+ int timeout;			// in seconds, -1 means no timeout
 };
 
 struct ANSWER_PROXY_AUTH {  // type number: 98
- unsigned auth_type;   // authentication type desired
+ unsigned long auth_type;   // authentication type desired
  unsigned auth_len;   // length of authentication data
 };
 
@@ -217,7 +224,7 @@ struct REQUEST_HEADER {
 
  unsigned  message_id;
  unsigned  message_type;
- unsigned  app_id;
+ unsigned  long app_id;		// must be long!
  unsigned  controller_id;
  unsigned  session_id;
 };
@@ -231,7 +238,7 @@ struct ANSWER_HEADER {
 
  unsigned  message_id;
  unsigned  message_type;
- unsigned  app_id;
+ unsigned  long app_id;		// must be long!
  unsigned  session_id;
  unsigned  proxy_error;
  unsigned long capi_error;

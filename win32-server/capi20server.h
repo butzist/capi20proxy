@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.5  2002/03/22 16:48:06  butzist
+ * just coded a little bit bt didn't finish
+ *
  * Revision 1.4  2002/03/03 20:38:19  butzist
  * added Log history
  *
@@ -27,6 +30,8 @@
 /*
     Declarations for the main program
 */
+
+#include "protocol.h"
 
 // CAPI functions
 extern "C" {
@@ -52,6 +57,10 @@ HANDLE TimeOut(DWORD Milliseconds,int* var,int val);
 SOCKET CreateSocket(int socktype, int protocol, UINT port);
 DWORD WINAPI TestStart(LPVOID param);
 DWORD ServiceExit();
+DWORD WINAPI StartSession(LPVOID param);
+int allocSession(SOCKET socke);
+void freeSession(int sess);
+
 
 struct TOParams{
 	DWORD Milliseconds;
@@ -63,15 +72,14 @@ extern SERVICE_STATUS          ServiceStatus;
 extern SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
 extern int run,pause; 
 extern FILE *f;
-extern SOCKET socke;
 extern HANDLE RunningThread;
 
-inline LPVOID malloc(size_t _size)
+inline LPVOID mymalloc(size_t _size)
 {
 	return HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,_size);
 }
 
-inline void free(LPVOID _ptr)
+inline void myfree(LPVOID _ptr)
 {
 	HeapFree(GetProcessHeap(),0,_ptr);
 }
@@ -177,3 +185,23 @@ int abodysize(UINT type)
 		return -1;
 	}
 }
+
+struct waiter_data
+{
+	SOCKET socket;
+	DWORD ApplID;
+	DWORD message_id;
+	DWORD session_id;
+};
+
+struct client_data
+{
+	SOCKET socket;
+	DWORD auth_type;
+	LPVOID auth_data;
+	char name[64];
+	__version_t	version;
+	DWORD keepalive;
+	DWORD session;
+	int os;
+};

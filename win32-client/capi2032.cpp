@@ -19,6 +19,10 @@
 
 /*
  * $Log$
+ * Revision 1.6  2002/03/22 14:38:30  butzist
+ * lol, I uploaded an old version yesterday. Now this is the new one.
+ * At least it causes no compiler errors
+ *
  * Revision 1.4  2002/03/03 20:38:19  butzist
  * added Log history
  *
@@ -35,42 +39,24 @@
 #include "protocol.h"
 #include "capi2032.h"
 
-#define VERSION_MAJOR	0
+#define VERSION_MAJOR	1
 #define VERSION_MINOR	1
 
-
-extern "C"
-{
-	c_register		old_register;
-	c_release		old_release;
-	c_put_message	old_put_message;
-	c_get_message	old_get_message;
-	c_wait_for_signal	old_wait_for_signal;
-	c_get_manufacturer	old_get_manufacturer;
-	c_get_version	old_get_version;
-	c_get_serial	old_get_serial;
-	c_get_profile	old_get_profile;
-	c_installed		old_installed;
-}
-
-unsigned char ctrl_map[MAX_CONTROLLERS+1];
 
 LPVOID GlobalBuffer=NULL;
 
 IN_ADDR toaddr;
 
-HMODULE dll;	
-UINT local_controllers, remote_controllers, controllers;
-applmap application_map[MAX_APPLICATIONS];
 int status=0;
 DWORD msg_id=0;
 char* __myname[64];
 SOCKET socke;
 int max_timeout=-1, timeout=0;
 HANDLE receiver;
-int run=1, pause=0;
 evlhash* hash_start=NULL;
+CRITICAL_SECTION hash_mutex, socket_mutex;
 UINT session_id=0;
+int onhash=0;
 
 BOOL APIENTRY DllMain( HANDLE hModule, 
                        DWORD  ul_reason_for_call, 
@@ -108,29 +94,13 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 			::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\The Reg Guy\\capi20proxy\\name\"","Error",MB_OK);
 			return FALSE;
 		}
-		toaddr.S_un.S_addr=inet_addr(ipstr);
 
 		RegCloseKey(key);
 
-		dll = LoadLibraryEx("oldcapi2032.dll",NULL,0);
-
-		if (dll==NULL)
-			return FALSE;
-
-		old_register=(c_register)GetProcAddress(dll,(LPCTSTR)1);
-		old_release=(c_release)GetProcAddress(dll,(LPCTSTR)2);
-		old_put_message=(c_put_message)GetProcAddress(dll,(LPCTSTR)3);
-		old_get_message=(c_get_message)GetProcAddress(dll,(LPCTSTR)4);
-		old_wait_for_signal=(c_wait_for_signal)GetProcAddress(dll,(LPCTSTR)5);
-		old_get_manufacturer=(c_get_manufacturer)GetProcAddress(dll,(LPCTSTR)6);
-		old_get_version=(c_get_version)GetProcAddress(dll,(LPCTSTR)7);
-		old_get_serial=(c_get_serial)GetProcAddress(dll,(LPCTSTR)8);
-		old_get_profile=(c_get_profile)GetProcAddress(dll,(LPCTSTR)9);
-		old_installed=(c_installed)GetProcAddress(dll,(LPCTSTR)10);
-
 		initConnection();
 
-		initControllerNum();
+		InitializeCriticalSection(&hash_mutex);
+		InitializeCriticalSection(&socket_mutex);
 
 		DWORD thid;
 		receiver=CreateThread(NULL,1024,messageDispatcher,NULL,0,&thid);
@@ -146,71 +116,22 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		if(GlobalBuffer!=NULL) free(GlobalBuffer);
 
-		run=0;
+		shutdown(socke,SD_RECEIVE);
 		if(WaitForSingleObject(receiver,5000)!=WAIT_OBJECT_0)
 		{
-			shutdownConnection();
+			closesocket(socke);
 			TerminateThread(receiver,1);
 		} else {
-			shutdownConnection();
+			closesocket(socke);
 		}
 
-		WSACleanup();
+		DeleteCriticalSection(&hash_mutex);
+		DeleteCriticalSection(&socket_mutex);
 
-		FreeLibrary(dll);
+		WSACleanup();
 		break;
 	}
 	return TRUE;
-}
-
-UINT getLocalApp(UINT _remote)
-{
-	for(int i=0; i<MAX_APPLICATIONS; i++)
-	{
-		if(application_map[i].remote==_remote)
-			return application_map[i].local;
-	}
-
-	return 0;
-}
-
-UINT getRemoteApp(UINT _local)
-{
-	for(int i=0; i<MAX_APPLICATIONS; i++)
-	{
-		if(application_map[i].local==_local)
-			return application_map[i].remote;
-	}
-
-	return 0;
-}
-
-
-void delApp(UINT _local)
-{
-	for(int i=0; i<MAX_APPLICATIONS; i++)
-	{
-		if(application_map[i].local==_local)
-		{
-			application_map[i].remote=0;
-			application_map[i].local=0;
-		}
-	}
-}
-
-bool addApp(UINT _local, UINT _remote)
-{
-	for(int i=0; i<MAX_APPLICATIONS; i++)
-	{
-		if(application_map[i].local==0)
-		{
-			application_map[i].remote=_remote;
-			application_map[i].local=_local;
-			return true;
-		}
-	}
-
-	return false;
 }
 
 UINT msgGetApplId(char* _msg)
@@ -235,73 +156,6 @@ void msgSetController(char* _msg, unsigned char _ctrl)
 	ncci += _ctrl;
 }
 
-void initControllerNum()
-{
-	// falsch, da CAPI_GET_CONTROLLER schon die Gesamtzahl zurückgibt
-	DWORD err;
-	char buffer[64];
-	
-	err=old_get_profile(buffer, 0);		//get the local CAPI profile
-	if(err==0x0000)
-	{
-		local_controllers=*((int*)buffer);
-	} else {
-		local_controllers=0;
-	}
-
-	err=CAPI_GET_PROFILE(buffer, 0);		//get the remote CAPI profile
-	if(err==0x0000)
-	{
-		remote_controllers=*((int*)buffer);
-	} else {
-		remote_controllers=0;
-	}
-
-	if(local_controllers>MAX_CONTROLLERS) local_controllers=MAX_CONTROLLERS;
-	if(remote_controllers>MAX_CONTROLLERS) remote_controllers=MAX_CONTROLLERS;
-
-	controllers=local_controllers+remote_controllers;
-
-	if(controllers>MAX_CONTROLLERS) controllers=MAX_CONTROLLERS;
-}
-
-int SocketSend(SOCKET s, const char *buf, int len, int flags, DWORD timeout){
-	fd_set sockets;
-	timeval select_timeout;
-	int ret;
-	
-	select_timeout.tv_sec=timeout;
-	select_timeout.tv_usec=0;
-
-	FD_ZERO(&sockets);
-	FD_SET(s,&sockets);
-	ret=select(0,NULL,&sockets,NULL,&select_timeout);
-
-	if((ret==0) || (ret==SOCKET_ERROR)){
-		return SOCKET_ERROR;
-	} else {
-		return send(s,buf,len,flags);
-	}
-}
-
-int SocketReceive(SOCKET s, char *buf, int len, int flags, DWORD timeout){
-	fd_set sockets;
-	timeval select_timeout;
-	int ret;
-	
-	select_timeout.tv_sec=timeout;
-	select_timeout.tv_usec=0;
-
-	FD_ZERO(&sockets);
-	FD_SET(s,&sockets);
-	ret=select(0,&sockets,NULL,NULL,&select_timeout);
-
-	if((ret==0) || (ret==SOCKET_ERROR)){
-		return SOCKET_ERROR;
-	} else {
-		return recv(s,buf,len,flags);
-	}
-}
 
 // The "main" function, the message dispatcher
 
@@ -351,7 +205,7 @@ DWORD initConnection()
 
 	header->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_PROXY_HELO);
 
-	err=SocketSend(socke,msg,header->message_len,0,5);
+	err=send(socke,msg,header->message_len,0);
 	if(err!=header->message_len)
 	{
 		closesocket(socke);
@@ -359,7 +213,7 @@ DWORD initConnection()
 		return 4;
 	}
 
-	err=SocketReceive(socke,msg,_MSG_BUFFER,0,10);
+	err=recv(socke,msg,_MSG_BUFFER,0);
 	if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
 	{
 		closesocket(socke);
@@ -413,20 +267,21 @@ DWORD initConnection()
 	return 0;
 }
 
-DWORD shutdownConnection()
-{
-	return closesocket(socke);
-}
-
 DWORD sendRequest(char* msg)
 {
-	return SocketSend(socke,msg,((REQUEST_HEADER*)msg)->message_len,0,5);
+	EnterCriticalSection(&socket_mutex);
+	DWORD err=send(socke,msg,((REQUEST_HEADER*)msg)->message_len,0);
+	LeaveCriticalSection(&socket_mutex);
+	return err;
 }
 
 DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 {
 	evlhash* queue=hash_start;
 
+	++onhash;
+
+	EnterCriticalSection(&hash_mutex);
 	if(queue)
 	{
         while(queue->next)
@@ -436,6 +291,7 @@ DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 		queue->next=(evlhash*)malloc(sizeof(evlhash));
 		if(!queue->next)
 		{		
+			LeaveCriticalSection(&hash_mutex);
 			return 1;
 		}
 		queue=queue->next;	
@@ -443,6 +299,7 @@ DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 		hash_start=(evlhash*)malloc(sizeof(evlhash));
 		if(!hash_start)
 		{
+			LeaveCriticalSection(&hash_mutex);
 			return 1;
 		}
 
@@ -455,6 +312,7 @@ DWORD addToHash(UINT _msgId, char** _data, HANDLE _thread)
 	queue->thread=_thread;
 	queue->data=_data;
 
+	LeaveCriticalSection(&hash_mutex);
 	return 0;
 }
 
@@ -463,6 +321,9 @@ DWORD removeFromHash(UINT _msgId)
 	evlhash* queue=hash_start;
 	evlhash* prev=NULL;
 
+	--onhash;
+
+	EnterCriticalSection(&hash_mutex);
 	while(queue)
 	{
 		if(queue->msgId==_msgId)
@@ -475,11 +336,14 @@ DWORD removeFromHash(UINT _msgId)
 			}
 
 			free(queue);
+			LeaveCriticalSection(&hash_mutex);
+			return 0;
 		}
 		prev=queue;
 		queue=queue->next;
 	}
 	
+	LeaveCriticalSection(&hash_mutex);
 	return 0;
 }
 
@@ -487,25 +351,39 @@ HANDLE getThreadFromMsgId(UINT _msgId)
 {
 	evlhash* queue=hash_start;
 
+	EnterCriticalSection(&hash_mutex);
 	while(queue)
 	{
 		if(queue->msgId==_msgId)
-			return queue->thread;
+		{
+			HANDLE thread=queue->thread;
+			LeaveCriticalSection(&hash_mutex);
+			return thread;
+		}
+		queue=queue->next;
 	}
 
+	LeaveCriticalSection(&hash_mutex);
 	return NULL;
 }
 
 char** getDataPtrFromMsgId(UINT _msgId)
 {
+	EnterCriticalSection(&hash_mutex);
 	evlhash* queue=hash_start;
 
 	while(queue)
 	{
 		if(queue->msgId==_msgId)
-			return queue->data;
+		{
+			char** data=queue->data;
+			LeaveCriticalSection(&hash_mutex);
+			return data;
+		}
+		queue=queue->next;
 	}
 
+	LeaveCriticalSection(&hash_mutex);
 	return NULL;
 }
 
@@ -552,10 +430,19 @@ bool verifyMessage(char* msg, UINT type)
 	return true;
 }
 
-DWORD waitForAnswer(UINT msgId, char** data)
+DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 {
-	addToHash(msgId,data,GetCurrentThread());
-	return SuspendThread(GetCurrentThread());
+	HANDLE thread;
+	DuplicateHandle(GetCurrentProcess(),GetCurrentThread(),GetCurrentProcess(),&thread,0,FALSE,DUPLICATE_SAME_ACCESS);
+	*answer=NULL;
+	addToHash(msgId,answer,thread);
+	sendRequest(request);
+	if(getDataPtrFromMsgId(msgId)!=NULL)
+	{
+		SuspendThread(GetCurrentThread());
+	}
+
+	return (DWORD)*answer;
 }
 
 void dispatchMessage(char* msg)
@@ -563,39 +450,26 @@ void dispatchMessage(char* msg)
 	ANSWER_HEADER *header=(ANSWER_HEADER*)msg;
 	HANDLE thread=getThreadFromMsgId(header->message_id);
 	char** data=getDataPtrFromMsgId(header->message_id);
-	
+
 	*data=msg;
 	removeFromHash(header->message_id);
 	ResumeThread(thread);
+	CloseHandle(thread);
 }
 
 DWORD WINAPI messageDispatcher(LPVOID param)
 {
 	DWORD err;
 
-	while(run==1)
+	while(true)
 	{
-		Sleep(100);
-		if(pause!=1)
+		void* msg=malloc(_MSG_BUFFER);
+		err=recv(socke,(char*)msg,_MSG_BUFFER,0);
+		if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
 		{
-			fd_set test;
-			test.fd_count=1;
-			test.fd_array[0]=socke;
-			
-			timeval time;
-			time.tv_sec=0;
-			time.tv_usec=500;
-
-			if(test.fd_count!=0)
-			{
-				void* msg=malloc(_MSG_BUFFER);
-				err=SocketReceive(socke,(char*)msg,_MSG_BUFFER,0,10);
-				if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
-				{
-					free(msg);
-				}
-				dispatchMessage((char*)msg);				
-			}
+			free(msg);
+		} else {
+			dispatchMessage((char*)msg);
 		}
 	}
 
@@ -613,18 +487,6 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 						   DWORD maxBDataLen,
 						   DWORD *pApplID)
 {
-	DWORD local_app=0;
-	DWORD err;
-	
-	// register the application first on the local oldcapi2032.dll
-	if(old_register!=NULL)
-	{
-		err=old_register(MessageBufferSize, maxLogicalConnection, maxBDataBlocks, maxBDataLen, &local_app);
-		if(err!=0x0000)
-			return err;		// exit if something doesn't work
-	}
-
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -652,12 +514,16 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_REGISTER);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -672,16 +538,6 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	
 	*pApplID=aheader->app_id;
 
-	// the server must exist and work... for we assign local app_ids to remote ones...
-	if(local_app!=0)
-	{
-		if(!addApp((UINT)local_app,(UINT)*pApplID))		// Add the two applIds to the map
-		{
-			free((void*)answer);
-			CAPI_RELEASE(*pApplID);		// release the appId
-		}
-	}
-	
 	DWORD capi_error=aheader->capi_error;
 	UINT proxy_error=aheader->proxy_error;
 	free((void*)answer);
@@ -696,14 +552,6 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 
 DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 {
-	UINT local_app = getLocalApp(ApplID);
-	
-	if(old_release!=NULL){
-		old_release(local_app);	// release the local appId
-	}
-
-	delApp(local_app);		// delete the appId from the map
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -727,12 +575,16 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_RELEASE);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -760,19 +612,6 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 							  LPVOID pCAPIMessage)
 {
-	if(msgGetController((char*)pCAPIMessage)>remote_controllers)
-	{
-		msgSetController((char*)pCAPIMessage, msgGetController((char*)pCAPIMessage)-remote_controllers);
-		msgSetApplId((char*)pCAPIMessage, getLocalApp(ApplID));
-
-		if(old_put_message!=NULL)
-		{
-			return old_put_message(getLocalApp(ApplID), pCAPIMessage);
-		} else {
-			return 0x1108;
-		}
-	}
-
 	char *data1,*data2;
 	UINT len1=0,len2=0;
 
@@ -797,7 +636,7 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 
 	rheader->app_id=ApplID;
 	rheader->session_id=session_id;
-	rheader->controller_id=msgGetController(data1);
+	//rheader->controller_id=msgGetController(data1); // The server will parse the message anyways
 	
 	memcpy(&len1,data1,2);
 	memcpy(rdata,data1,len1);	// copy the CAPI message to the message
@@ -820,12 +659,16 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PUTMESSAGE)+len1+len2;
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -852,17 +695,6 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 
 DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 {
-	if(old_get_message!=NULL)
-	{
-		 if(old_get_message(getLocalApp(ApplID), ppCAPIMessage)==0x0000)
-		 {
-			msgSetController((char*)*ppCAPIMessage, msgGetController((char*)*ppCAPIMessage)+remote_controllers);
-			msgSetApplId((char*)*ppCAPIMessage, getRemoteApp(ApplID));
-			
-			return 0x0000;
-		 }
-	}
-
 	UINT len1=0,len2=0;
 
 	char* request=(char*)malloc(_MSG_BUFFER);
@@ -888,12 +720,16 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_GETMESSAGE);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -959,10 +795,8 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 	return capi_error;
 }
 
-DWORD WINAPI waiting_proc_1(void* param)
+DWORD APIENTRY CAPI_WAIT_FOR_SIGNAL(DWORD ApplID)
 {
-	DWORD ApplID=(DWORD)param;
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -986,12 +820,16 @@ DWORD WINAPI waiting_proc_1(void* param)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_WAITFORSIGNAL);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -1016,55 +854,8 @@ DWORD WINAPI waiting_proc_1(void* param)
 	return capi_error;
 }
 
-DWORD WINAPI waiting_proc_2(void* param)
-{
-	DWORD ApplID=(DWORD)param;
-
-	if(old_wait_for_signal!=NULL)
-	{
-		return old_wait_for_signal(ApplID);
-	}
-
-	return 0x1108;
-}
-
-DWORD APIENTRY CAPI_WAIT_FOR_SIGNAL(DWORD ApplID)
-{
-	DWORD thid1, thid2;
-	HANDLE thread_handles[2] = { NULL, NULL };
-	DWORD num=1;
-
-	thread_handles[0]=CreateThread(NULL,1024,waiting_proc_1,(LPVOID)ApplID,0,&thid1);
-	if(old_wait_for_signal!=NULL)
-	{
-		thread_handles[1]=CreateThread(NULL,1024,waiting_proc_2,(LPVOID)ApplID,0,&thid2);
-		num=2;
-	}
-
-	num=WaitForMultipleObjects(num,thread_handles,FALSE,180*1000);
-
-	if((WAIT_OBJECT_0<=num) && (num<(WAIT_OBJECT_0+2)))
-	{
-		DWORD error;
-		if(GetExitCodeThread(thread_handles[num-WAIT_OBJECT_0],&error))
-		{
-			return error;
-		}
-	}
-
-	return 0x1108;	
-}
-
 void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer)
 {
-	if(old_get_manufacturer!=NULL)
-	{
-		old_get_manufacturer(szBuffer);
-		return;
-	}
-
-	szBuffer[0]=0;
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -1088,12 +879,16 @@ void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_MANUFACTURER);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -1125,11 +920,6 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 							  DWORD * pManufacturerMajor,
 							  DWORD * pManufacturerMinor)
 {
-	if(old_get_version!=NULL)
-	{
-		return old_get_version(pCAPIMajor, pCAPIMinor, pManufacturerMajor, pManufacturerMinor);
-	}
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -1153,12 +943,16 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_VERSION);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -1190,13 +984,6 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 
 DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 {
-	if(old_get_serial!=NULL)
-	{
-		return old_get_serial(szBuffer);
-	}
-
-	szBuffer[0]=0;
-
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -1220,12 +1007,16 @@ DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_SERIAL);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -1255,34 +1046,6 @@ DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 								DWORD CtrlNr)
 {
-	DWORD err;
-	((char*)szBuffer)[0]=0; //I don't think we need this
-
-	if(CtrlNr>remote_controllers)		// request for a local controller
-	{
-		if(old_get_profile!=NULL)
-		{
-			err = old_get_profile(szBuffer, CtrlNr-remote_controllers);
-			*((UINT*)szBuffer)=controllers;		// Set the number of returned controllers to the real number of controller we got
-
-			return err;
-		}
-	}
-
-	if(CtrlNr==0)		// general request to the driver (no specific controller)
-	{
-		if(old_get_profile!=NULL)
-		{
-			err = old_get_profile(szBuffer, CtrlNr-remote_controllers);
-			*((UINT*)szBuffer)=controllers;		// Set the number of returned controllers to the real number of controller we got
-
-			if(err==0x0000)		// if the local .dll got problems try to pass the request to the remote server
-			{
-				return 0x0000;
-			}
-		}
-	}
-	
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -1307,12 +1070,16 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_PROFILE);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
+
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
@@ -1326,8 +1093,6 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 	}	
 
 	memcpy(szBuffer,abody->profile,64);		// copy the profile to the result
-	*((UINT*)szBuffer)=controllers;		// Set the number of returned controllers to the real number of controller we got
-	
 	
 	DWORD capi_error=aheader->capi_error;
 	UINT proxy_error=aheader->proxy_error;
@@ -1343,14 +1108,6 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 
 DWORD APIENTRY CAPI_INSTALLED(void)
 {
-	//first try to call CAPI_INSTALLED from oldcapi2032.dll
-	if(old_installed!=NULL)
-	{
-		if(old_installed()==0x0000) // zero means NO_ERROR -> CAPI is installed
-			return 0x0000;
-	}
-
-	
 	char* request=(char*)malloc(_MSG_BUFFER);
 	if(request==NULL)
 	{
@@ -1374,13 +1131,16 @@ DWORD APIENTRY CAPI_INSTALLED(void)
 	rheader->message_len=sizeof(REQUEST_HEADER)+sizeof(REQUEST_CAPI_INSTALLED);
 	// Ok, the message is ready, now let us send it and wait for the answer
 	
-	sendRequest(request);
-	free((void*)request);
-
 	char* answer; // The pointer that will point to the answer
-	waitForAnswer(id,&answer);
-	// when the function terminates we are sure to have received a message
 
+	sendAndReceive(id,request,&answer);
+	free((void*)request);
+	// when the function terminates we have received a message
+
+	if(answer==NULL)	// or maybe not
+	{
+		return 0x1108;
+	}
 
 	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
 	ANSWER_CAPI_INSTALLED *abody=(ANSWER_CAPI_INSTALLED*)(answer+aheader->header_len);
