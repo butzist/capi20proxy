@@ -95,6 +95,7 @@ EXPORT_NO_SYMBOLS;
 MODULE_DESCRIPTION("CAPI Proxy Client driver");
 MODULE_AUTHOR("Begumisa Gerald (beg_g@eahd.or.ug) & Adam Szalkowski (adam@szalkowski.de)");
 MODULE_SUPPORTED_DEVICE("kernelcapi");
+MODULE_LICENSE("GPL");
 
 typedef struct __capi20proxy_card
 {
