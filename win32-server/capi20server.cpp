@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.8  2002/03/29 07:52:06  butzist
+ * seems to work (got problems with DATA_B3)
+ *
  * Revision 1.7  2002/03/22 16:48:06  butzist
  * just coded a little bit bt didn't finish
  *
@@ -292,8 +295,8 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 		Sleep(100);
 		if(pause!=1){
 			fd_set test;
-			test.fd_count=1;
-			test.fd_array[0]=socke;
+			FD_ZERO(&test);
+			FD_SET(socke,&test);
 			
 			timeval time;
 			time.tv_sec=0;
@@ -355,6 +358,71 @@ void freeSession(int sess)
 	sockets[sess]=INVALID_SOCKET;
 }
 
+void add_app(DWORD _ApplID, appl_list** _list)
+{
+	if(*_list!=NULL)
+	{
+		appl_list* list=(*_list);
+		while(list->next)
+		{
+			list=list->next;
+		}
+
+		list->next=(appl_list*)mymalloc(sizeof(appl_list));
+		
+		list=list->next;
+		list->ApplID=_ApplID;
+		list->next=NULL;
+	} else {
+		(*_list)=(appl_list*)mymalloc(sizeof(appl_list));
+		(*_list)->ApplID=_ApplID;
+		(*_list)->next=NULL;
+	}
+}
+
+void del_app(DWORD _ApplID, appl_list** _list)
+{
+	if((*_list)!=NULL)
+	{
+		appl_list* list=(*_list);
+		appl_list* prev=NULL;
+		
+		while(list!=NULL)
+		{
+			if(list->ApplID==_ApplID)
+			{
+				if(prev!=NULL)
+				{
+					prev->next=list->next;
+				} else {
+					(*_list)=list->next;
+				}
+				myfree((void*)list);
+				return;
+			}
+			prev=list;
+			list=list->next;
+		}
+	}
+}
+
+DWORD getfirst_app(appl_list** _list)
+{
+	if((*_list)==NULL)
+	{
+		return 0;
+	} else {
+		appl_list* list=(*_list);
+		DWORD ret=list->ApplID;
+
+		(*_list)=list->next;
+
+		myfree((void*)list);
+		return ret;
+	}
+
+}
+
 
 DWORD exec_capi_register(REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,char* rdata, client_data* client)
 {
@@ -378,6 +446,12 @@ DWORD exec_capi_register(REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,ch
 		rbody->maxBDataLen,
 		&(aheader->app_id));
 
+	if(aheader->capi_error==0x0000)
+	{
+		// add registered app to list
+		add_app(aheader->app_id, &(client->registered_apps));
+	}
+
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
 	return send(client->socket,answer,aheader->message_len,0);
 }
@@ -398,6 +472,12 @@ DWORD exec_capi_release(REQUEST_HEADER* rheader,REQUEST_CAPI_RELEASE* rbody,char
 	aheader->proxy_error=PERROR_NONE;
 
 	aheader->capi_error=CAPI_RELEASE(rheader->app_id);
+
+	if(aheader->capi_error==0x0000)
+	{
+		// delete registered app from list
+		del_app(rheader->app_id, &(client->registered_apps));
+	}
 
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
 	return send(client->socket,answer,aheader->message_len,0);
@@ -429,8 +509,8 @@ DWORD exec_capi_putmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbod
 		{
 			aheader->proxy_error=PERROR_PARSE_ERROR;
 		} else {
-			unsigned char cmd1=rdata[4];
-			unsigned char cmd2=rdata[5];
+			unsigned char cmd1=CAPI_CMD1(rdata);
+			unsigned char cmd2=CAPI_CMD2(rdata);
 
 			if((cmd1==0x86) && (cmd2==0x80))	// If we got a DATA_B3 REQ
 			{
@@ -438,7 +518,7 @@ DWORD exec_capi_putmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbod
 				{
 					aheader->proxy_error=PERROR_PARSE_ERROR;
 				} else {
-                    UINT len2;
+                    UINT len2=0;
 					memcpy(&len2,rdata+16,2);	// get the length of the data
 					
 					if(len1+len2>rheader->data_len)
@@ -484,8 +564,8 @@ DWORD exec_capi_getmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_GETMESSAGE* rbod
 		memcpy(adata,message,len1);		// copy the message to the answer
 		aheader->data_len=len1;
 
-		unsigned char cmd1=adata[4];
-		unsigned char cmd2=adata[5];
+		unsigned char cmd1=CAPI_CMD1(adata);
+		unsigned char cmd2=CAPI_CMD2(adata);
 
 		if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
 		{
@@ -827,12 +907,32 @@ DWORD WINAPI StartSession(LPVOID param)
 	client.auth_type=AUTH_NO_AUTH;
 	client.keepalive=_TIMEOUT;
 	client.session=session+sess;
+	client.registered_apps=NULL;
 
 
-	while(true)
+	while(run==1)
 	{
 		if(pause!=1)
 		{
+/*			fd_set test;
+			FD_ZERO(&test);
+			FD_SET(client.socket,&test);
+			
+			timeval time;
+			time.tv_sec=0;
+			time.tv_usec=500;
+
+			if(select(0,&test,NULL,NULL,&time)==SOCKET_ERROR){
+				DebugOut("StartSession(): select",FALSE);
+				break;				
+			}
+
+			if(!FD_ISSET(client.socket,&test))
+			{
+				// no data pending
+				continue;
+			}*/
+
 			err=recv(client.socket,request,_MSG_SIZE,0);	// blocking call
 			if(err==0 || err==SOCKET_ERROR)
 			{
@@ -858,7 +958,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_REGISTER",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_register(header,(REQUEST_CAPI_REGISTER*)body,data,&client);
+					if(exec_capi_register(header,(REQUEST_CAPI_REGISTER*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -868,7 +971,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_RELEASE",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_release(header,(REQUEST_CAPI_RELEASE*)body,data,&client);
+					if(exec_capi_release(header,(REQUEST_CAPI_RELEASE*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -878,7 +984,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PUTMESSAGE",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_putmessage(header,(REQUEST_CAPI_PUTMESSAGE*)body,data,&client);
+					if(exec_capi_putmessage(header,(REQUEST_CAPI_PUTMESSAGE*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -888,7 +997,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_GETMESSAGE",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_getmessage(header,(REQUEST_CAPI_GETMESSAGE*)body,data,&client);
+					if(exec_capi_getmessage(header,(REQUEST_CAPI_GETMESSAGE*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -898,7 +1010,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_WAITFORSIGNAL",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_waitforsignal(header,(REQUEST_CAPI_WAITFORSIGNAL*)body,data,&client);
+					if(exec_capi_waitforsignal(header,(REQUEST_CAPI_WAITFORSIGNAL*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -908,7 +1023,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_MANUFACTURER",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_manufacturer(header,(REQUEST_CAPI_MANUFACTURER*)body,data,&client);
+					if(exec_capi_manufacturer(header,(REQUEST_CAPI_MANUFACTURER*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -918,7 +1036,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_VERSION",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_version(header,(REQUEST_CAPI_VERSION*)body,data,&client);
+					if(exec_capi_version(header,(REQUEST_CAPI_VERSION*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -928,7 +1049,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_SERIAL",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_serial(header,(REQUEST_CAPI_SERIAL*)body,data,&client);
+					if(exec_capi_serial(header,(REQUEST_CAPI_SERIAL*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -938,7 +1062,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PROFILE",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_profile(header,(REQUEST_CAPI_PROFILE*)body,data,&client);
+					if(exec_capi_profile(header,(REQUEST_CAPI_PROFILE*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -948,7 +1075,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_INSTALLED",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_capi_installed(header,(REQUEST_CAPI_INSTALLED*)body,data,&client);
+					if(exec_capi_installed(header,(REQUEST_CAPI_INSTALLED*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -956,14 +1086,20 @@ DWORD WINAPI StartSession(LPVOID param)
 
 			case TYPE_PROXY_HELO:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_HELO",FALSE);
-				exec_proxy_helo(header,(REQUEST_PROXY_HELO*)body,data,&client);
+				if(exec_proxy_helo(header,(REQUEST_PROXY_HELO*)body,data,&client)==SOCKET_ERROR)
+				{
+					DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+				}
 				break;
 
 			case TYPE_PROXY_KEEPALIVE:
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_KEEPALIVE",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_proxy_keepalive(header,(REQUEST_PROXY_KEEPALIVE*)body,data,&client);
+					if(exec_proxy_keepalive(header,(REQUEST_PROXY_KEEPALIVE*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -973,7 +1109,10 @@ DWORD WINAPI StartSession(LPVOID param)
 				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_AUTH",FALSE);
 				if(verifySessionId(request,session+sess))
 				{
-					exec_proxy_auth(header,(REQUEST_PROXY_AUTH*)body,data,&client);
+					if(exec_proxy_auth(header,(REQUEST_PROXY_AUTH*)body,data,&client)==SOCKET_ERROR)
+					{
+						DebugOut("ReceiveRequest(): sending answer failed",FALSE);
+					}
 				} else {
 					DebugOut("ReceiveRequest(): verifySessionId() failed",FALSE);
 				}
@@ -982,6 +1121,8 @@ DWORD WINAPI StartSession(LPVOID param)
 			default:
 				DebugOut("ReceiveRequest(): Invalid Message Type",FALSE);
 			}
+		} else {
+			Sleep(100);
 		}
 	}
 
@@ -990,6 +1131,14 @@ DWORD WINAPI StartSession(LPVOID param)
 		exec_proxy_shutdown(&client,"Connection shutting down");
 	} else {
 		exec_proxy_shutdown(&client,"Socket Error");
+	}
+
+	// now we release all registered Apps
+	DWORD app;
+
+	while(app=getfirst_app(&(client.registered_apps)))
+	{
+		CAPI_RELEASE(app);
 	}
 
 	closesocket(client.socket);
@@ -1110,43 +1259,32 @@ SOCKET CreateSocket(int socktype, int protocol, UINT port)
 
 DWORD ServiceExit(){
     run=0;
-	int stopwait=0; // for stopping the wait queues. will be set by a thread to 1
-                    // after a specified time.
+	pause=0;
 
+	int i;
+
+	for(i=0; i<_MAX_SESSIONS; i++)
+	{
+		shutdown(sockets[i],SD_RECEIVE);
+	}
+
+	shutdown(socke,SD_RECEIVE);
 	if(WaitForSingleObject(RunningThread,5000)!=WAIT_OBJECT_0){
 		DebugOut("ExitThread(): WaitForSingleObject");
+		closesocket(socke);
+
 		TerminateThread(RunningThread,ERROR_BUSY);
 	}
 	CloseHandle(RunningThread);
-
-
-	if(TimeOut(30000,&stopwait,1)){
-		while((!stopwait) && recv_threads){
-			Sleep(100);
-		}
-	}
-	
-	if(recv_threads){
-		SetLastError(recv_threads);
-		DebugOut("ExitService(): Some threads hung! Closing socket and waiting...");
-	}
-		
-	//shutdown(socke,SD_BOTH);
 	closesocket(socke);
 
-	stopwait=0;
-	
-	if(TimeOut(5000,&stopwait,1)){
-		while((!stopwait) && recv_threads){
-			Sleep(100);
-		}
+	for(i=0; i<_MAX_SESSIONS; i++)
+	{
+		closesocket(sockets[i]);
 	}
 
-	if(recv_threads){
-		SetLastError(recv_threads);
-		DebugOut("ExitService(): Sorry but still some threads aure hung. Exiting anyways.");
-	}
+	Sleep(1000);
 
-	return (DWORD)recv_threads;
+	return 0;
 }
 

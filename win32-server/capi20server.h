@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.6  2002/03/29 07:52:06  butzist
+ * seems to work (got problems with DATA_B3)
+ *
  * Revision 1.5  2002/03/22 16:48:06  butzist
  * just coded a little bit bt didn't finish
  *
@@ -61,6 +64,17 @@ DWORD WINAPI StartSession(LPVOID param);
 int allocSession(SOCKET socke);
 void freeSession(int sess);
 
+#define APPL_ID(msg)	(*((UINT*)(((char*)msg)+2)))
+#define CAPI_NCCI(msg)	(*((DWORD*)(((char*)msg)+8)))
+#define CAPI_CMD1(msg)	(*((unsigned char*)(((char*)msg)+4)))
+#define CAPI_CMD2(msg)	(*((unsigned char*)(((char*)msg)+5)))
+
+void inline SET_CTRL(char* _msg, unsigned char _ctrl)
+{
+	DWORD& ncci=CAPI_NCCI(_msg);
+	ncci &=  0xFFFFFF80;
+	ncci += _ctrl;
+}
 
 struct TOParams{
 	DWORD Milliseconds;
@@ -186,6 +200,12 @@ int abodysize(UINT type)
 	}
 }
 
+struct appl_list
+{
+	appl_list* next;
+	DWORD ApplID;
+};
+
 struct waiter_data
 {
 	SOCKET socket;
@@ -204,4 +224,5 @@ struct client_data
 	DWORD keepalive;
 	DWORD session;
 	int os;
+	appl_list* registered_apps;
 };
