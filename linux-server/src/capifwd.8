@@ -1,0 +1,74 @@
+.\" (c) 2003 by Adam Szalkowski <adam@szalkowski.de>
+.TH CAPIFWD 8 capifwd
+.SH NAME
+.B capifwd
+\- a daemon forwarding capi messages to capi20proxy clients
+.SH SYNOPSIS
+.B capifwd
+.I [\-h]
+.I [\-v]
+.I [\-f <configfile>]
+.I [\-p <port>]
+.SH DESCRIPTION
+.B capifwd
+is the server component of the capi20proxy program for sharing ISDN card over a TCP/IP based network.
+it makes your ISDN card available to the other computers in the net.
+.SH OPTIONS
+.TP
+.BI \-h|\-\-help
+Display a short help text and exit.
+.TP
+.BI \-v|\-\-version
+same as \-h
+.TP
+.BI \-f|\-\-file \ <configfile> 
+Specify
+.I configfile
+as the configuration file to use.
+.B(not yet implemented)
+.TP
+.BI \-p|\-\-port \ <port>
+Set the
+.IR port
+the
+.I daemon
+will listen on for incoming connections
+.SH FEATURES
+.B capifwd
+.SH MAILING-LIST
+The capi20proxy mailing list is
+.IR capi20proyx-public@lists.sourceforge.net .
+Information about subscribing and archives is available at
+.IR http://lists.sourceforge.net/lists/listinfo/capi20proxy-public .
+.SH DOWNLOAD
+Via HTTP from
+.IR http://capi20proxy.sourceforge.net/ .
+.br
+To get the newest version from CVS, enter:
+.br
+cvs -d:pserver:anonymous@cvs.sourceforge.net:/cvsroot/capi20proxy login
+.br
+cvs -z3 -d:pserver:anonymous@cvs.sourceforge.net:/cvsroot/capi20proxy co linux-server
+.br
+.SH SEE ALSO
+.BR capifwd.conf (5),
+.SH FILES
+.TP
+.I /etc/capifwd.conf
+this will be the configuration file when someone implements it
+.SH BUGS
+Send bug reports or comments to
+.br
+Adam Szalkowski
+.I <adam@butzisten.de>
+or 
+.br
+Friedrich Lindenberg
+.I <friedrich@butzisten.de>
+.br
+(German or English).
+.SH AUTHOR
+This page was written by Adam Szalkowski
+.I <adam@butzisten.de>
+.br
+It's my first manpage so do not expect it to be perfect
