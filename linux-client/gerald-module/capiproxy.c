@@ -391,7 +391,7 @@ int capiproxy_read_proc(char *page,
 	len += sprintf(page+len, "%-16s %s\n", "name", cinfo->cardname);
 	len += sprintf(page+len, "%-16s 0x0\n", "io");
 	len += sprintf(page+len, "%-16s -\n", "irq");
-	len += sprintf(page+len, "%-16s %s\n", "type, "Virtual Card :-)");
+	len += sprintf(page+len, "%-16s %s\n", "type", "Virtual Card :-)");
 
 	if ((s = cinfo->version[CAPIPROXY_VER_DRIVER]) != 0)
 		len += sprintf(page+len, "%-16s %s\n", "ver_driver", s);
