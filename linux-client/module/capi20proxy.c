@@ -49,48 +49,11 @@
 #include "capilli.h"
 #include "capiutil.h"
 #include "capicmd.h"
-
-EXPORT_NO_SYMBOLS;
-
-#define CAPIPROXY_MAXCONTR	4
-
-#define CAPIPROXY_MAJOR		69
-#define MSG_QUEUE_LENGTH	16
-
-#define CAPIPROXY_VERSIONLEN	8
-#define CAPIPROXY_VER_DRIVER	0
-
-#define TYPE_PROXY		0x00
-#define TYPE_MESSAGE		0x01
-#define TYPE_REGISTER_APP	0x02
-#define TYPE_RELEASE_APP	0x03
-#define TYPE_SHUTDOWN		0x04
-
-#define IOCTL_SET_DATA		0x01
-#define IOCTL_ERROR_REGFAIL	0x02
-#define IOCTL_APPL_REGISTERED	0x03
-
-/*
- * Before we send any messages to the server, we
- * determine whether it has been registered
- */
-
-#define APPL_FREE		0
-#define APPL_CONFIRMED		1 /* Server registered the application */
-#define APPL_WAITING		2 /* Server has not yet answered */
-#define APPL_REVOKED		3
-
-#define CARD_FREE		0
-#define CARD_RUNNING		1
+#include "capi20proxy.h"
 
 #define APPL(card,a)			(card->applications[(a)-1])
 
-/*
- * Error codes for possible ioctl() errors
- * to be sent to the daemon
- */
-
-#define ENOTREG			1 /* Controller not registered */
+EXPORT_NO_SYMBOLS;
 
 MODULE_DESCRIPTION("CAPI Proxy Client driver");
 MODULE_AUTHOR("Begumisa Gerald (beg_g@eahd.or.ug) & Adam Szalkowski (adam@szalkowski.de)");
@@ -282,6 +245,7 @@ void capiproxy_remove_ctr(struct capi_ctr *ctrl)
 	
 	(*ctrl->suspend_output)(ctrl);
 	capiproxy_flush_queue(card);
+	card->status=CARD_REMOVING;
 	
 	capiproxy_send_message(ctrl, skb);
 
@@ -330,8 +294,15 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	capi_register_params arp;
 
+	if(card->status!=CARD_RUNNING)
+	{
+		printk(KERN_ERR "%s card %d: Tried to register application on not running controller", DRIVERNAME, ctrl->cnr);
+		(*ctrl->appl_released)(ctrl,appl);
+		return;
+	}
+
 	if (!APPL_IS_FREE(card,appl)) {
-		printk(KERN_ERR "%s card %d: Application %d already registered\n", DRIVERNAME, card->ctrl->cnr, appl);
+		printk(KERN_ERR "%s card %d: Application %d already registered\n", DRIVERNAME, ctrl->cnr, appl);
 		return;
 	}
 	
@@ -341,7 +312,7 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
 
 	capiproxy_register_internal(ctrl, appl, &arp);
 	APPL_MARK_WAITING(card,appl);
-	printk(KERN_NOTICE "%s card %d: Application %d registering\n", DRIVERNAME, card->ctrl->cnr, appl);
+	printk(KERN_NOTICE "%s card %d: Application %d registering\n", DRIVERNAME, ctrl->cnr, appl);
 }
 
 /*
@@ -366,7 +337,7 @@ void capiproxy_release_appl(struct capi_ctr *ctrl,
 {
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	
-	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl)) {
+	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl) || (card->status!=CARD_RUNNING)) {
 		(*ctrl->appl_released)(ctrl, appl);
 		printk(KERN_ERR "%s card %d: Releasing free application or invalid applid -- %d\n", DRIVERNAME, ctrl->cnr, appl);
 		return;
@@ -413,6 +384,13 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	__u16 applid;
 
+	if(card->status!=CARD_RUNNING)
+	{
+		printk(KERN_ERR "%s card %d: message for not running card dropped", DRIVERNAME, ctrl->cnr);
+		kfree_skb(skb);
+		return;
+	}
+	
 	applid = CAPIMSG_APPID(skb->data);
 
 	switch(CAPIMSG_COMMAND(skb->data)) {
@@ -533,6 +511,7 @@ int capiproxy_ioctl(struct inode *inode,
 					(void **)(&temp),
 					sizeof(struct capi_profile));
 			(*ctrl->ready)(ctrl);
+			card->status=CARD_RUNNING;
 			printk(KERN_NOTICE "%s card %d: controller ready", DRIVERNAME, ctrl->cnr);
 			return 0;
 		}
@@ -689,7 +668,10 @@ ssize_t capiproxy_write(struct file *file,
 	unsigned char *writepos;
 
 	if(card->status!=CARD_RUNNING)
+	{
+		printk(KERN_ERR "%s card %d: Card not ready to receive messages", DRIVERNAME, ctrl->cnr);
 		return -1;
+	}
 
 	/* don't we get the length from the legth parameter? */
 	if(!(skb = alloc_skb(length+1, GFP_ATOMIC))) {
@@ -763,7 +745,7 @@ int capiproxy_open(struct inode *inode, struct file *file)
 
 	capiproxy_init_appls(card);
 	
-	card->status = CARD_RUNNING;
+	card->status = CARD_NOT_READY;
 	skb_queue_head_init(&card->outgoing_queue);
 	init_waitqueue_head(&card->wait_queue_out);
 	
