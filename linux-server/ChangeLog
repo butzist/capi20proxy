@@ -1,0 +1,66 @@
+
+
+ChangeLog for the Linux-Server of CAPI20Proxy 
+ by F. Lindenberg, A. Szalkowski, (C) 2002. 
+
+Changes from 0.6.2 to 0.6.3:
+ - The program has been split up into many source files. 
+ - An init-script has been added. The script was made for 
+   Debian 3.0 but it should work with any other distro, too.
+ - PThread code was removed completely. 
+ - Command-Line arguments were added. I also tried out some 
+   code on config-files but it proofed to be not stable 
+   enough to go into mainstream capifwd. 
+ - A problem with zombies beeing created by handlers was 
+   removed by adding a SIGCHLD handler. 
+ - New "chackdep.sh"-script that checks for libcapi. 
+ - The Code was cleaned up everywhere. 
+
+Changes previous to 0.6.2: 
+ - There is no ChangeLog for the whole program previous to 0.6.2. 
+   There are, however, the entries from CVS Log in main.c: 
+
+   $Log$
+   Revision 1.13  2002/04/15 08:33:09  butzist
+     tried to implement auto-release of applications. but didn't test it yet.
+      
+   Revision 1.12  2002/04/12 15:10:48  butzist
+     working no a little bit better. must implement auto capi_release on
+     connection down.
+	 
+  Revision 1.11  2002/04/12 10:32:35  butzist
+    ok now we got no zombie processes anymore but instead the are 3
+    processes started for each connection... dunno why.
+	    
+  Revision 1.10  2002/04/11 18:10:07  butzist
+    trying to get rid of zombie process
+       
+  Revision 1.9  2002/04/11 08:59:48  butzist
+    added the comment files again
+		  
+  Revision 1.7  2002/04/10 15:05:47  butzist
+    capi_register/release, proxy_helo and capi_installed seem
+    to work at least
+    the client hangs when calling capi_waitforsignal
+		       
+  Revision 1.6  2002/04/10 12:09:13  butzist
+    looked through the code, now waiting for Fritzle to
+    find the syntax errors and compile it
+    it could work now but many features are missing
+			    
+  Revision 1.5  2002/03/21 18:25:35  frlind
+    new waitformessage......
+			        
+  Revision 1.3  2002/03/21 12:25:19  frlind
+    some makefile modifications, void battle in
+    main.c and several other injuries
+				   
+  Revision 1.2  2002/03/20 14:34:11  frlind
+    multi-threading implemented. do we need a
+    mutex for capi?
+				      
+  Revision 1.1  2002/03/20 11:18:26  frlind
+    new project tree
+    many bugfixes
+					   
+  All previous entries are no good at all. 
