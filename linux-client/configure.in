@@ -1,0 +1,32 @@
+AC_INIT(capi2.c)
+
+AC_PROG_CC
+AC_PROG_INSTALL
+
+AC_CHECK_HEADERS(linux/fs.h)
+AC_CHECK_HEADERS(linux/module.h)
+AC_CHECK_HEADERS(linux/config.h)
+AC_CHECK_HEADERS(linux/init.h)
+AC_CHECK_HEADERS(linux/kernel.h)
+AC_CHECK_HEADERS(linux/sched.h)
+AC_CHECK_HEADERS(linux/smp_lock.h)
+
+AC_CHECK_HEADERS(asm/unistd.h)
+AC_CHECK_HEADERS(asm/system.h)
+AC_CHECK_HEADERS(asm/uaccess.h)
+
+AC_C_CONST
+AC_C_INLINE
+AC_HEADER_TIME
+
+AC_MSG_CHECKING(for directory with kernel source)
+AC_ARG_WITH(kernel,
+	[ --with-kernel=dir	the directory where your kernel sources are]
+	[			[/usr/src/linux]],
+	kerneldir="$withval", kerneldir="/usr/src/linux")
+AC_DEFINE_UNQUOTED(CONFIG_PATCH_KERNELDIR, "$kerneldir")
+CONFIG_PATCH_KERNELDIR="$kerneldir"
+AC_SUBST(CONFIG_PATCH_KERNELDIR)
+AC_MSG_RESULT($kerneldir)
+
+AC_OUTPUT(Makefile)

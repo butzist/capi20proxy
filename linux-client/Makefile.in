@@ -1,0 +1,20 @@
+CC=@CC@
+KERNELDIR=@CONFIG_PATCH_KERNELDIR@
+CFLAGS := -O2 -Wstrict-prototypes  -fomit-frame-pointer -fno-strict-aliasing -pipe -fno-strength-reduce -DCPU=686 -march=i686 -Wall -DDEBUG -DMODULE -D__KERNEL__ -DLINUX
+INCLUDES := -I$(KERNELDIR)/include
+MODULES= capi2.o
+
+capi2.o:	capi2.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c capi2.c
+
+install:	capi2.o
+	mkdir -p /lib/modules/`uname -r`/kernel/drivers/char
+	cp $(MODULES) /lib/modules/`uname -r`/kernel/drivers/char
+	/sbin/depmod -aq
+
+clean:
+	rm -rf *.o *~
+
+mrproper:
+	rm -rf *.o *~ config.cache Makefile
+

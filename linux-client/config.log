@@ -1,0 +1,25 @@
+This file contains any messages produced by compilers while
+running configure, to aid debugging if configure makes a mistake.
+
+configure:532: checking for gcc
+configure:645: checking whether the C compiler (gcc  ) works
+configure:661: gcc -o conftest    conftest.c  1>&5
+configure:687: checking whether the C compiler (gcc  ) is a cross-compiler
+configure:692: checking whether we are using GNU C
+configure:720: checking whether gcc accepts -g
+configure:782: checking for a BSD compatible install
+configure:836: checking how to run the C preprocessor
+configure:919: checking for linux/fs.h
+configure:959: checking for linux/module.h
+configure:999: checking for linux/config.h
+configure:1039: checking for linux/init.h
+configure:1079: checking for linux/kernel.h
+configure:1119: checking for linux/sched.h
+configure:1159: checking for linux/smp_lock.h
+configure:1200: checking for asm/unistd.h
+configure:1240: checking for asm/system.h
+configure:1280: checking for asm/uaccess.h
+configure:1318: checking for working const
+configure:1393: checking for inline
+configure:1433: checking whether time.h and sys/time.h may both be included
+configure:1469: checking for directory with kernel source
