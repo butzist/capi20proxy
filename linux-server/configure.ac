@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.57)
-AC_INIT([capi20proxy], [0.7], [friedrich@butzisten.de adam@butzisten.de])
+AC_INIT([capi20proxy], [0.6.3], [friedrich@butzisten.de adam@butzisten.de])
 AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR([src/appindex.c])
 AM_CONFIG_HEADER([config.h])
@@ -29,5 +29,5 @@ AC_FUNC_MALLOC
 AC_FUNC_REALLOC
 AC_TYPE_SIGNAL
 AC_CHECK_FUNCS([inet_ntoa memset socket])
-AC_CONFIG_FILES([Makefile src/Makefile])
+AC_CONFIG_FILES([Makefile doc/Makefile src/Makefile contrib/Makefile])
 AC_OUTPUT
