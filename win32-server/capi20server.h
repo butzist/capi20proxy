@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.7  2002/04/08 20:46:53  butzist
+ * voice communication performance improved
+ * doing automatic CAPI_RELEASE for each registered application when connection to client breaks
+ * seems not to hang
+ *
  * Revision 1.6  2002/03/29 07:52:06  butzist
  * seems to work (got problems with DATA_B3)
  *
@@ -63,6 +68,8 @@ DWORD ServiceExit();
 DWORD WINAPI StartSession(LPVOID param);
 int allocSession(SOCKET socke);
 void freeSession(int sess);
+
+INT_PTR CALLBACK dialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 #define APPL_ID(msg)	(*((UINT*)(((char*)msg)+2)))
 #define CAPI_NCCI(msg)	(*((DWORD*)(((char*)msg)+8)))

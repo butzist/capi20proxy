@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <stdio.h>
+#include <shellapi.h>
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ fügt zusätzliche Deklarationen unmittelbar vor der vorherigen Zeile ein.

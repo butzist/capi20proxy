@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.9  2002/04/08 20:46:53  butzist
+ * voice communication performance improved
+ * doing automatic CAPI_RELEASE for each registered application when connection to client breaks
+ * seems not to hang
+ *
  * Revision 1.8  2002/03/29 07:52:06  butzist
  * seems to work (got problems with DATA_B3)
  *
@@ -40,6 +45,7 @@
 #include "stdafx.h"
 #include "capi20server.h"
 #include "protocol.h"
+#include "resource.h"
 
 #define __PORT	6674	// Fritzle's Telefonnummer :-)
 #define _MAX_SESSIONS	127
@@ -47,7 +53,7 @@
 #define _TIMEOUT		-1		// no timeout
 
 #define	_VERSION_MAJOR	1
-#define _VERSION_MINOR	1
+#define _VERSION_MINOR	2
 
 const __version_t	_SERVER_VERSION = { _VERSION_MAJOR, _VERSION_MINOR };
 const char* _SERVER_NAME = "CAPI 2.0 Proxy Win32 Server";
@@ -59,7 +65,7 @@ const char* LOGFILE="c:\\winnt\\capi20proxy.log";
 
 SERVICE_STATUS          ServiceStatus; 
 SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
-int run,pause,debug,recv_threads; 
+int run,pause,debug,service; 
 FILE *f;
 HANDLE RunningThread;
 DWORD session=0;
@@ -85,13 +91,24 @@ void DebugOut(char* msg,BOOL type_error){
 
 int main(int argc, char* argv[])
 { 
+	f=NULL;
 	RunningThread=0;
-	debug=1; // change to 0
+	debug=0;
+	service=0;
+	run=1;
+	pause=0;
 
-	for(int i=1;i<argc;i++) {
+	int i;
+
+	for(i=1;i<argc;i++) {
 		if(strcmp(argv[i],"-debug")==0){
 			debug=1; // Debug Modus!
-			f=NULL;
+		}
+	}
+
+	for(i=1;i<argc;i++) {
+		if(strcmp(argv[i],"-service")==0){
+			service=1; // Service Modus!
 		}
 	}
 
@@ -102,7 +119,7 @@ int main(int argc, char* argv[])
 
 	
 	// open file for debug output
-	if(debug==0) f=fopen(LOGFILE,"a+t");
+	if(service) f=fopen(LOGFILE,"a+t");
 
 	for(i=1;i<argc;i++) {
 		if(strcmp(argv[i],"-i")==0){
@@ -117,6 +134,8 @@ int main(int argc, char* argv[])
 			
 			char lpszBinaryPathName[512];
 			GetModuleFileName(NULL,lpszBinaryPathName,512);
+			strcat(lpszBinaryPathName," -service");
+
 
 			SC_HANDLE schService = CreateService( 
 				schSCManager,              // SCManager database 
@@ -175,7 +194,7 @@ int main(int argc, char* argv[])
 		} else
 
 		if((strcmp(argv[i],"-?")==0) || (strcmp(argv[i],"-help")==0)){
-			printf("\r\nUse folloging switches:\r\n\t-i\tInstall as Service under Windows NT\r\n\t-u\tUninstall the Service\r\n\t-debug\tRun Debug mode. Works also under Windows 9.x\r\n");
+			printf("\r\nUse folloging switches:\r\n\t-i\tInstall as Service under Windows NT\r\n\t-u\tUninstall the Service\r\n\t-debug\tRun Debug mode\r\n\t-service\tRun as a Service\r\n");
 			return 0;
 		}
 	}
@@ -192,7 +211,7 @@ int main(int argc, char* argv[])
 	
 	// The Debug mode starts the server in a console (not as a service in 
 	// the background). All messages are sent to the console.
-	if(!debug){
+	if(service){
 		SERVICE_TABLE_ENTRY   DispatchTable[] = 
 		{ 
 			{ "capi20server", ServiceStart      }, 
@@ -211,7 +230,16 @@ int main(int argc, char* argv[])
 		if(RunningThread==NULL){
 			DebugOut("main(): CreateThread");
 		} else {
-			::MessageBox(NULL,"\"OK\" to shutdown the server","Capi 2.0 Proxy Server",MB_OK);
+			if(!debug)
+			{
+				char title[512];		// ein bissl umständlich... aber GetConsoleWindow() gibt es erst ab Win2k
+				GetConsoleTitle(title,512);
+				HWND console=FindWindow(NULL,title);
+				ShowWindow(console,SW_HIDE);
+			}
+			
+			DialogBox(GetModuleHandle(NULL),MAKEINTRESOURCE(IDD_DIALOG),NULL,dialogProc);
+			// this is a modal dialog box
 			ServiceExit();
 		}
 	}
@@ -220,6 +248,62 @@ int main(int argc, char* argv[])
 	WSACleanup();
 	_fcloseall();
 	return 0;
+}
+
+INT_PTR CALLBACK dialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	NOTIFYICONDATA ndata;
+
+	
+	ndata.cbSize=sizeof(NOTIFYICONDATA);
+	ndata.hWnd=hwnd;
+	ndata.uID=0;
+	ndata.uCallbackMessage=WM_USER;
+	ndata.hIcon=LoadIcon(GetModuleHandle(NULL),MAKEINTRESOURCE(IDI_ICON));
+	strcpy(ndata.szTip,"CAPI 2.0 Proxy Win32 Server");
+	ndata.uFlags=NIF_MESSAGE | NIF_TIP | NIF_ICON;
+	
+	switch(msg)
+	{
+	case WM_INITDIALOG:
+		Shell_NotifyIcon(NIM_ADD,&ndata);
+		return FALSE;
+
+	case WM_COMMAND:
+
+		switch((UINT)wParam)
+		{
+		case IDC_PAUSE:
+			if(pause==0)
+				pause=1;
+			else
+				pause=0;
+			return TRUE;
+
+		case IDOK:
+			run=0;
+			Shell_NotifyIcon(NIM_DELETE,&ndata);
+			EndDialog(hwnd, IDOK);
+			return TRUE;
+
+		default:
+			return FALSE;
+		}
+
+	case WM_USER:
+		if(((UINT)lParam)==WM_LBUTTONDOWN || ((UINT)lParam)==WM_RBUTTONDOWN)
+		{
+			ShowWindow(hwnd,SW_SHOW);
+		}
+		return TRUE;
+
+	case WM_CLOSE:
+		ShowWindow(hwnd,SW_HIDE);
+		return TRUE;
+
+	default:
+		return FALSE;
+	}
 }
 
 
@@ -233,7 +317,7 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 	DWORD status; 
 	DWORD specificError; 
 
-    if(!debug){
+    if(service){
 		ServiceStatus.dwServiceType        = SERVICE_WIN32; 
 		ServiceStatus.dwCurrentState       = SERVICE_START_PENDING; 
 		ServiceStatus.dwControlsAccepted   = SERVICE_ACCEPT_STOP | 
@@ -247,7 +331,7 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
  	run=1;
 	pause=0;
 
-	if(!debug){
+	if(service){
 		ServiceStatusHandle = RegisterServiceCtrlHandler("capi20server",&ServiceCtrlHandler); 
  
 		if (ServiceStatusHandle == (SERVICE_STATUS_HANDLE)0) 
@@ -263,7 +347,7 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 	// Handle error condition 
     if (status != 0) 
     { 
-	    if(!debug){
+	    if(service){
 			ServiceStatus.dwCurrentState       = SERVICE_STOPPED; 
 			ServiceStatus.dwCheckPoint         = 0; 
 			ServiceStatus.dwWaitHint           = 0; 
@@ -276,7 +360,7 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
     } 
  
     
-	if(!debug){
+	if(service){
 		// Initialization complete - report running status. 
 		ServiceStatus.dwCurrentState       = SERVICE_RUNNING; 
 		ServiceStatus.dwCheckPoint         = 0; 
@@ -527,11 +611,15 @@ DWORD exec_capi_putmessage(REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbod
 					} else {
 						DWORD pointer=(DWORD)rdata+len1;		// data is appended to the message
 						memcpy(rdata+12,&pointer,4);
+						
+						// call the CAPI function
+						aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
 					}
 				}
+			} else {
+				// call the CAPI function
+				aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
 			}
-			// call the CAPI function
-			aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
 		}
 	}
 
