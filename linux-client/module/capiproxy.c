@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.1  2002/03/24 22:14:37  butzist
+ * changed the directory
+ *
  * Revision 1.3  2002/03/03 20:58:13  butzist
  * formatted
  *
@@ -90,9 +93,20 @@ static ssize_t capiproxy_read(struct file *_f,char *_buffer, size_t _size, loff_
 static ssize_t capiproxy_write(struct file *_f,const char *_buffer, size_t _size, loff_t *_off);
 
 MODULE_DESCRIPTION(             "CAPI Proxy Client driver");
-MODULE_AUTHOR(                  "[Butzisten] The Red Guy (adam(at)szalkowski.de) && ...");
+MODULE_AUTHOR(                  "[Butzisten] The Red Guy <adam@szalkowski.de>");
 MODULE_SUPPORTED_DEVICE(        "kernelcapi");
 
+#define APPL_ID(msg)	(*((UINT*)(((char*)msg)+2)))
+#define CAPI_NCCI(msg)	(*((DWORD*)(((char*)msg)+8)))
+#define CAPI_CMD1(msg)	(*((unsigned char*)(((char*)msg)+4)))
+#define CAPI_CMD2(msg)	(*((unsigned char*)(((char*)msg)+5)))
+
+void SET_CTRL(char* _msg, unsigned char _ctrl)
+{
+	DWORD& ncci=CAPI_NCCI(_msg);
+	ncci &=  0xFFFFFF80;
+	ncci += _ctrl;
+}
 
 static spinlock_t kernelcapi_lock;
 
@@ -115,8 +129,8 @@ static struct capi_driver capiproxy_driver = {
 
 static struct file_operations capiproxy_fops = {
 	owner:	THIS_MODULE,
-	read:	capiproxy_read,
-	write:	capiproxy_write,
+	read:	NULL,
+	write:	NULL,
 	poll:	NULL,
 	ioctl:	capiproxy_ioctl,
 	open:	capiproxy_open,
@@ -194,8 +208,6 @@ void capiproxy_register_appl(struct capi_ctr *_ctrl, __u16 _applId, capi_registe
 //		}
 //	}
 
-	//CapiRegister(_applId); // What is this for?
-	
 	/* tell kcapi that we actually registerd the appl */
 	ctrl->appl_registered(_ctrl, _applId);
 
@@ -231,8 +243,7 @@ void capiproxy_release_appl(struct capi_ctr *_ctrl, __u16 _applId)
 //		}
 //	}
 
-	//CapiRelease(_applId); // What is this for?
-	
+
 	/* tell kcapi that we actually released the appl */
 	ctrl->appl_released(_ctrl, _applId);
 
@@ -285,70 +296,49 @@ int capiproxy_ctl_read_proc(char *_buffer, char **_start, off_t _off,int _count,
 
 /********** The functions for the character device interface ***********/
 
-static ssize_t capiproxy_read(struct file *_f, char *_buffer, size_t _size, loff_t *_off)
+static int capiproxy_ioctl(struct inode *_i, struct file *_f, unsigned int _cmd, unsigned long _b)
 {
-	int minor=MINOR(_f->f_dentry->d_inode->i_rdev);
-	int major=MAJOR(_f->f_dentry->d_inode->i_rdev);
+    char* buffer = (char*)(void*) _b;
+	unsigned int size=_cmd & 0x3fff; // the first two bits are reserved for the ioctl commands
+	int id=(int)_f->private_data;		// we saved the mapped controller id in the file struct
 
-
-	while((queue_empty(&(card[minor].msg_queue))) && (_f->f_flags & F_BLOCK)) {} //wait until message arrives if file opened in blocking mode
-
-	struct sk_buff *skb=queue_top(&(card[minor].msg_queue));
-        
-	int len=0;
-	if(skb!=NULL)
-	{
-		len=skb->length;
-		if(len>size)
+    
+    switch(_cmd & 0xc000)
+    {
+	case IOCTL_SET_DATA:
+		if(card[id].ctrl!=NULL)
 		{
-			printk("%s: Buffer too small, data lost");  // You won't be notified directly if data is lost!!!!
-			len=_size;
+			if(size<CAPI_MANUFACTURER_LEN+CAPI_VERSION_LEN+CAPI_SERIAL_LEN+CAPI_PROFILE_LEN)
+			{
+				printk("%s: IOCTL_SET_DATA: message too short", DRIVERNAME);
+				return ERESTARTSYS;
+			}
+
+			// copy driver data to kernelspace
+			
+			copy_from_user(card[id].ctrl->manu, buffer, CAPI_MANUFACTURER_LEN);
+			buffer += CAPI_MANUFACTURER_LEN;
+
+			copy_from_user(card[id].ctrl->version, buffer, CAPI_VERSION_LEN);
+			buffer += CAPI_VERSION_LEN;
+
+			copy_from_user(card[id].ctrl->serial, buffer, CAPI_SERIAL_LEN);
+			buffer[CAPI_SERIAL_LEN-1] = 0;
+			buffer += CAPI_SERIAL_LEN;
+
+			copy_from_user(card[id].ctrl->profile, buffer, CAPI_PROFILE_LEN);
+			
+			card[id].ctrl->ready(card[id].ctrl);
 		}
+		break;
 
-		char* writepos = skb_put(skb);
-
-		copy_to_user(buffer, writepos, len); //queue -> buffer
-		{
-			printk("%s: Failed copying data to userspace", DRIVERNAME);
-			kfree_skb(skb);
-			return ERESTARTSYS;
-		}
-
-		kfree_skb(skb);
-	}
-
-	return len;		//len will be 0 if queue is empty
-}
-
-static ssize_t capiproxy_write(struct file *_f, const char *_buffer, size_t _size, loff_t *_off)
-{
-	int minor=MINOR(_f->f_dentry->d_inode->i_rdev);
-	int major=MAJOR(_f->f_dentry->d_inode->i_rdev);
-
-	if(_size<4) return 0; //the first DWORD (unsigned long) should indicate the type of the message
-
-	__u32 type;
-
-	if(!get_user(type,(__u32*)_buffer))
-	{
-		printk("%s: Failed getting value from userspace", DRIVERNAME);
-		return ERESTARTSYS;
-	}
-
-
-	// set the size and the pointer to the data to the "real" values
-	size_t size = _size - 4;
-	char* buffer = _buffer + 4;
-	
-	switch(type)
-	{
-
-	case TYPE_MESSAGE:
+	case IOCTL_PUT_MESSAGE:
 		spin_lock(&kernalcapi_lock);
 
-		if(card[minor].ctrl!=NULL)
+
+		if(card[id].ctrl!=NULL)
 		{
-			struct sk_buff skb;
+			struct sk_buff* skb;
 			skb = alloc_skb(size), GFP_ATOMIC);
 			byte *writepos = (byte *) skb_put(skb, size);
 			
@@ -358,110 +348,101 @@ static ssize_t capiproxy_write(struct file *_f, const char *_buffer, size_t _siz
 				return ERESTARTSYS;
 			}
 
+			SET_CTRL((char*)(skb->data),card[id].ctrl->cnr);		// set the controller number to the real ctrl_id before sending to CAPI
 
-			if(CAPI_MESSAGE(skb->data)==CAPI_CONNECT_B3_IND)  //not too shure, whether this is the only possible message
+
+			if(CAPI_CMD1(skb->data)==0x82 && CAPI_CMD2(skb->data)==0x82)  //CONNECT_B3_IND
 			{
-				ctrl->new_ncci(APPL_ID(skb->data,CAPI_NCCI(skb->data)));   //only symbolic!
+				ctrl->new_ncci(card[id].ctrl,APPL_ID(skb->data),CAPI_NCCI(skb->data),MAX_DATA_B3);
 			}
                         
-			if(CAPI_MESSAGE(skb->data)==CAPI_DISCONNECT_B3_IND)  //not too shure, whether this is the only possible message
+			if(CAPI_CMD1(skb->data)==0x84 && CAPI_CMD2(skb->data)==0x82)  //DISCONNECT_B3_IND
 			{
-				ctrl->release_ncci(APPL_ID(skb->data,CAPI_NCCI(skb->data)));   //only symbolic!
+				ctrl->release_ncci(card[id].ctrl,APPL_ID(skb->data),CAPI_NCCI(skb->data));
 			}
 
-			card[minor].ctrl->handle_capi_msg(buffer,ApplId,skb,...);
+			card[id].ctrl->handle_capimsg(card[id].ctrl,APPL_ID(skb->data),skb);
 
 			//kfree_skb(skb);         //have I to do this?
 		}
 		else
 		{
-			printk("%s: Controller %i seems not to be registered\n Skipping message\n", DRIVERNAME, minor);
+			printk("%s: Controller %i seems not to be registered\n Skipping message\n", DRIVERNAME, id);
 		}
 
 		spin_unlock(&kernelcapi_lock);
 		break;
 
-	default:
-		//ignore
-	}
 
-	return _size;
-}
+	case IOCTL_GET_MESSAGE:
+		while((queue_empty(&(card[id].msg_queue))) && (_f->f_flags & F_BLOCK)) {} //wait until message arrives if file opened in blocking mode
 
-static int capiproxy_ioctl(struct inode *_i, struct file *_f, unsigned int _cmd, unsigned long _b)
-{
-    char* buffer = (char*)(void*) _b;
-    int major = MAJOR(_i->i_rdev);
-    int minor = MINOR(_i->i_rdev);
-    
-    switch(_cmd)
-    {
-	case IOCTL_SET_DATA:
-		ctrl=card[minor].ctrl;
-
-		if(ctrl!=NULL)
+		struct sk_buff *skb=queue_top(&(card[id].msg_queue));
+        
+		int len=0;
+		if(skb!=NULL)
 		{
-			// Copy driver data to Kernelspace (dunno if it's really called copy_to_system())
-			
-			copy_to_system(ctrl->manu, buffer, CAPI_MANUFACTURER_LEN);
-			buffer += CAPI_MANUFACTURER_LEN;
+			len=skb->length;
+			if(len>size)
+			{
+				printk("%s: Buffer too small, data lost");  // You won't be notified directly if data is lost!!!!
+				len=size;		// data will be truncated
+			}
 
-			copy_to_system(ctrl->version, buffer, CAPI_VERSION_LEN);
-			buffer += CAPI_VERSION_LEN;
+			SET_CTRL((char*)(skb->data),id);	// set the controller number to the mapped controller id
 
-			copy_to_system(ctrl->serial, buffer, CAPI_SERIAL_LEN);
-			buffer[CAPI_SERIAL_LEN-1] = 0;
-			buffer += CAPI_SERIAL_LEN;
+			char* writepos = skb_put(skb);
 
-			copy_to_system(ctrl->profile, buffer, CAPI_PROFILE_LEN);
-			
-			ctrl->ready(ctrl);
+			copy_to_user(buffer, writepos, len); //queue -> buffer
+			{
+				printk("%s: Failed copying data to userspace", DRIVERNAME);
+				kfree_skb(skb);
+				return ERESTARTSYS;
+			}
+
+			kfree_skb(skb);
 		}
 		break;
 
-	case IOCTL_USED:
-		
-		if(card[minor].count>1) return 1;
-		else return 0;
-		break;
-
 	default:
-	    copy_to_user(buffer,"Hallo\n",6);   //Daten von Kernel- in den Userspace kopieren
+		printk("%s: unknown ioctl received\n", DRIVERNAME);
     }
-    
-    printk("%s: ioctl called with major(%i) and minor(%i)\n", DRIVERNAME, major, minor);
 
     return (0);
 }
 
 static int capiproxy_open(struct inode *_i, struct file *_f)
 {
-    int major = MAJOR(_i->i_rdev);
-    int minor = MINOR(_i->i_rdev);
+	int id=findFreeId();
+	if(id==-1)
+	{
+	    printk("%s: no free Ids left", DRIVERNAME);
+		return -1;
+	}
+
+	_f->private_data=(void*)id;		// we save the mapped controller id in the file struct...
 	int error=0;
-    
-    printk("%s: open called with major(%i) and minor(%i)\n", DRIVERNAME, major, minor);
     
 	// first set the name and revision in the struct
 	spin_lock(&kernelcapi_lock);
 
-	if(card[minor].count==0)
+	if(card[id].count==0)
 	{
 
-		sprintf(capiproxy_driver.name, "capi20proxy%i",minor);
+		sprintf(capiproxy_driver.name, "capi20proxy%i",id);
 		sprintf(capiproxy_driver.revision, "0");
 
-		card[minor].ctrl = di->attach_ctrl(capiproxy_driver, DRIVERNAME, (void*)minor);	// we save the mapped controller id in the driverdata field
+		card[id].ctrl = di->attach_ctrl(capiproxy_driver, DRIVERNAME, (void*)id);	// we save the mapped controller id in the driverdata field
 
-		card[minor].msg_queue.length=MSG_QUEUE_LENGTH;
-	    queue_init(&(card[minor].msg_queue));
+		card[id].msg_queue.length=MSG_QUEUE_LENGTH;
+	    queue_init(&(card[id].msg_queue));
 	} else {
-		error=1;
+		error=-1;
 	}
 
-	card[minor].count++;
+	card[id].count++;
 
-	spin_lock(&kernelcapi_lock);
+	spin_unlock(&kernelcapi_lock);
 	
 	MOD_INC_USE_COUNT;
     
@@ -473,21 +454,18 @@ static int capiproxy_release(struct inode *_i, struct file *_f)
 
     MOD_DEC_USE_COUNT;
 
-    int major = MAJOR(_i->i_rdev);
-    int minor = MINOR(_i->i_rdev);
-    
-    printk("%s: release called with major(%i) and minor(%i)\n",DRIVERNAME, major, minor);
+    int id=(int)_f->private_data;
 
 	spin_lock(&kernelcapi_lock);
 	
-	if(card[minor].count==1)
+	if(card[id].count==1)
 	{
 		di->detach_ctrl(card[minor].ctrl);
 
-		card[minor].count--;
-		card[minor].ctrl=NULL;
+		card[id].count--;
+		card[id].ctrl=NULL;
     
-		queue_free(&(card[minor].msg_queue));
+		queue_free(&(card[id].msg_queue));
 	}
 
 	spin_unlock(&kernelcapi_lock);
@@ -549,7 +527,7 @@ static void __exit capiproxy_exit()
 	{
 		if(card[i].ctrl!=NULL)
 		{
-			di->release_ctrl(ctrl,...)
+			di->release_ctrl(ctrl)
 			queue_free(&(card[i].msg_queue));    
 		}
 	}
