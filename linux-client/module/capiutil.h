@@ -1,7 +1,7 @@
 #ifndef __CAPIPROXYUTILS_H__
 #define __CAPIPROXYUTILS_H__
 
-#include <asm/types.h>
+/*#include <asm/types.h>*/
 
 #define CAPIMSG_BASELEN		8
 #define CAPIMSG_U8(m, off)	(m[off])

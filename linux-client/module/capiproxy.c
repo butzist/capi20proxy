@@ -1,6 +1,6 @@
 /*
  *   capi20proxy linux client module (Provides a remote CAPI port over TCP/IP)
- *   Copyright (c) 2002. Begumisa Gerald. All rights reserved
+ *   Copyright (c) 2002. Begumisa Gerald & Adam Szalkowski. All rights reserved
  *
  *   This program is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
@@ -30,57 +30,54 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <asm/uaccess.h>
+#include <linux/skbuff.h>
 #include <linux/config.h>
 #include <linux/smp_lock.h>
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
-#include <kernelcapi.h>
-#include <capilli.h>
+#include <linux/capi.h>
+#include <linux/kernelcapi.h>
+#include <linux/tqueue.h>
 
-#include "capiutils.h"
+#include "capilli.h"
+#include "capiutil.h"
 #include "capicmd.h"
 
 EXPORT_NO_SYMBOLS;
 
-#define CAPIPROXY_VERSIONLEN	1 /* One pointer so far */
-#define CAPIPROXY_VER_DRIVER	0 /* the offset of the pointer to the driver version */
+#define CAPIPROXY_MAXCONTR	4
 
 #define CAPIPROXY_MAJOR		69
 #define MAX_CONTROLLERS		16
 #define MSG_QUEUE_LENGTH	16
 
+#define CAPIPROXY_VERSIONLEN	8
+#define CAPIPROXY_VER_DRIVER	0
+
+#define TYPE_PROXY		0x00
 #define TYPE_MESSAGE		0x01
 #define TYPE_REGISTER_APP	0x02
 #define TYPE_RELEASE_APP	0x03
 #define TYPE_SHUTDOWN		0x04
 
 #define IOCTL_SET_DATA		0x01
-/*
- * An error message sent by the daemon telling
- * us that the application's registration failed
- * and hence we should call ctrl->appl_released()
- */
-#define IOCTL_ERROR_REGFAIL     0x02
-
-#define APPL(a)			(&applications[(a)-1])
-#define VALID_APPLID(a)		((a) && (a) <= CAPI_MAXAPPL && APPL(a)->applid == a)
-#define APPL_IS_FREE(a)		(APPL(a)->applid == 0)
-#define APPL_MARK_FREE(a)	do{ APPL(a)->applid=0; MOD_DEC_USE_COUNT; }while(0);
-#define APPL_MARK_USED(a)	do{ APPL(a)->applid=(a); MOD_INC_USE_COUNT; }while(0);
+#define IOCTL_ERROR_REGFAIL	0x02
+#define IOCTL_APPL_REGISTERED	0x03
 
 /*
  * Before we send any messages to the server, we
  * determine whether it has been registered
  */
 
-#define APPL_CONFIRMED		0 /* Server registered the application */
-#define APPL_REVOKED		1 /* Server failed to register the application */
+#define APPL_FREE		0
+#define APPL_CONFIRMED		1 /* Server registered the application */
 #define APPL_WAITING		2 /* Server has not yet answered */
+#define APPL_REVOKED		3
 
-#define CARD(c)			(&cards[(c)-1])
 #define CARD_FREE		0
 #define CARD_RUNNING		1
-#define VALID_CARD(c)		(CARD(c)->status)
+
+#define APPL(card,a)			(card->applications[(a)-1])
 
 /*
  * Error codes for possible ioctl() errors
@@ -90,39 +87,35 @@ EXPORT_NO_SYMBOLS;
 #define ENOTREG			1 /* Controller not registered */
 
 MODULE_DESCRIPTION("CAPI Proxy Client driver");
-MODULE_AUTHOR("Begumisa Gerald (beg_g@eahd.or.ug)");
+MODULE_AUTHOR("Begumisa Gerald (beg_g@eahd.or.ug) & Adam Szalkowski (adam@szalkowski.de)");
 MODULE_SUPPORTED_DEVICE("kernelcapi");
 
 typedef struct __capi20proxy_card
 {
 	__u8 status; 
-	__u16 ctrl_id;	/* This corresponds exactly to ctrl->cnr */
 
 	struct capi_ctr *ctrl;
 	struct sk_buff_head outgoing_queue;
 	wait_queue_head_t wait_queue_out;
 
-	struct capiproxyctrl_info {
-		char cardname[32];
-		spinlock_t ctrl_lock;
-		int versionlen; 	/* Length of the version in versionbuf*/
-		char versionbuf[8];
-		char *version[CAPIPROXY_VERSIONLEN];
-		char infobuf[128];      /* for function procinfo */
-		struct capi20proxy_card *card;
-		int in_sk, out_sk;      /* buffer count */
-		int sk_pending;         /* number of out-going buffers currently in queue */
-	} *pcapiproxyctrl_info;
+	char cardname[32];
+	spinlock_t ctrl_lock;
+	int versionlen; 	/* Length of the version in versionbuf*/
+	char version[CAPIPROXY_VERSIONLEN];
+	char infobuf[128];      /* for function procinfo */
+	int in_sk, out_sk;      /* buffer count */
+	int sk_pending;         /* number of out-going buffers currently in queue */
+	
+	__u8 applications[CAPI_MAXAPPL];	/* application stats are per-controller! */
 } capi20proxy_card;
 
-typedef struct __capiproxy_appl {
+/*typedef struct __capiproxy_appl {
 	capi_register_params 	rp;
-	__u16 			applid;		/* kcapi application identifier */
-	__u8			status;		/* tells our module whether this appl is up */
-} capiproxy_appl;
+	__u16 			applid;		/ kcapi application identifier /
+	__u8			status;		/ tells our module whether this appl is up /
+} capiproxy_appl;*/
 
-static capi20proxy_card cards[CAPI_MAXCONTR];
-static capiproxy_appl applications[CAPI_MAXAPPL];
+static capi20proxy_card cards[CAPIPROXY_MAXCONTR];
 static spinlock_t kernelcapi_lock;
 static struct capi_driver_interface *di;
 
@@ -140,40 +133,133 @@ wait_queue_head_t rmmod_queue;
 static __u16 system_shutting_down = 0;
 
 static char *main_revision	= "$Revision$";
-static char *capiproxy_version	= "1.2";
+static char *capiproxy_version	= "0.6.1";
 static char *DRIVERNAME		= "capi20proxy";
 static char *DRIVERLNAME	= "Capi 2.0 Proxy Client (http://capi20proxy.sourceforge.net)";
 static char *CARDNAME		= "CAPI Virtual Card";
 static char *MANUFACTURER_NAME	= "http://capi20proxy.sourceforge.net";
 
-static void capiproxy_flush_queue(capi20proxy *this_card)
-{
-	struct sk_buff *skb;
-	struct capiproxyctrl_info *cinfo = this_card->pcapiproxyctrl_info;
+/* some prototypes */
+void capiproxy_register_appl(struct capi_ctr *ctrl,__u16 appl, struct capi_register_params *rp);
+void capiproxy_release_appl(struct capi_ctr *ctrl, __u16 appl);
+void capiproxy_remove_ctr(struct capi_ctr *ctrl);
+void capiproxy_send_message(struct capi_ctr *ctrl,struct sk_buff *skb);
+void capiproxy_reset_ctr(struct capi_ctr *ctrl);
+int capiproxy_load_firmware(struct capi_ctr *ctrl, capiloaddata *data);
+char *capiproxy_procinfo(struct capi_ctr *ctrl);
+int capiproxy_read_proc(char *page,char **start,off_t off,int count,int *end,struct capi_ctr *ctrl);
 
-	while ((skb = skb_dequeue(&this_card->outgoing_queue)) != 0)
-		kfree_skb(skb);
+int capiproxy_ioctl(struct inode *inode, struct file *file, unsigned int ioctl_num,unsigned long ioctl_param);
+ssize_t capiproxy_read(struct file *file, char *buffer,size_t length, loff_t *offset);
+ssize_t capiproxy_write(struct file *file, const char *buffer, size_t length, loff_t *offset);
+int capiproxy_open(struct inode *inode, struct file *file);
+int capiproxy_release(struct inode *inode, struct file *file);
 
-	spin_lock(cinfo->ctrl_lock);
-	cinfo->sk_pending = 0;
-	spin_unlock(cinfo->ctrl_lock);
+
+static void handle_send_msg(void *dummy);
+static void capiproxy_init_appls(capi20proxy_card *card);
+static void capiproxy_release_internal(struct capi_ctr *ctrl, __u16 appl);
+static int capiproxy_find_free_id(void);
+
+static struct file_operations capiproxy_fops = {
+	owner:		THIS_MODULE,
+	llseek:		NULL,
+        read:		capiproxy_read,
+	write:		capiproxy_write,
+	poll:		NULL,
+	ioctl:		capiproxy_ioctl,
+	open:		capiproxy_open,
+	flush:		NULL,
+	release:	capiproxy_release,
+	lock:		NULL
+};
+
+static struct tq_struct tq_send_notify = {
+	{NULL},
+	0,
+	handle_send_msg,
+	NULL
+};
+
+static struct capi_driver capiproxy_driver = {
+	"capi20proxy",
+	"1.4",
+	capiproxy_load_firmware,
+	capiproxy_reset_ctr,
+	capiproxy_remove_ctr,
+	capiproxy_register_appl,
+	capiproxy_release_appl,
+	capiproxy_send_message,
+	capiproxy_procinfo,
+	capiproxy_read_proc,
+	0,				/* Use standard driver read proc */
+	0,				/* No add card function */
+};
+
+
+
+inline int APPL_IS_FREE(capi20proxy_card *card, __u16 a)
+{ 
+	return APPL(card,a) == APPL_FREE;
 }
 
-void capiproxy_remove_ctr(struct capi_ctr *ctrl);
+inline void APPL_MARK_FREE(capi20proxy_card *card, __u16 a)
+{
+	APPL(card,a)= APPL_FREE;
+}
+
+inline void APPL_MARK_WAITING(capi20proxy_card *card, __u16 a)
+{
+	APPL(card,a)= APPL_WAITING;
+}
+
+inline void APPL_MARK_CONFIRMED(capi20proxy_card *card, __u16 a)
+{
+	APPL(card,a)= APPL_CONFIRMED;
+}
+
+inline void APPL_MARK_REVOKED(capi20proxy_card *card, __u16 a)
+{
+	APPL(card,a)= APPL_REVOKED;
+}
+
+inline int VALID_APPLID(capi20proxy_card *card, __u16 a)
+{
+	return (a && (a <= CAPI_MAXAPPL) && APPL(card,a));
+}
+
+static void capiproxy_flush_queue(capi20proxy_card *card)
+{
+	struct sk_buff *skb;
+
+	while ((skb = skb_dequeue(&(card->outgoing_queue))) != 0)
+		kfree_skb(skb);
+
+	spin_lock(&(card->ctrl_lock));
+	card->sk_pending = 0;
+	spin_unlock(&(card->ctrl_lock));
+}
+
+void capiproxy_remove_ctr(struct capi_ctr *ctrl)
 {
 	struct sk_buff *skb;
 	__u16 len;
-	__u16 applid;
+	__u16 appl;
 	__u8 command, subcommand;	
 
-	applid = 0;
+	appl = 0;
 
 	/*
 	 * Tell the daemon listening on this controller
 	 * that we're shutting down the controller
+	 *
+	 * This looks like a "normal" CAPI message,
+	 * but the command TYPE_PROXY tells the deamon
+	 * that this message is only a control message
+	 * that must not be forwarded to the server
 	 */
-	command = TYPE_SHUTDOWN;
-	subcommand = 0;
+	subcommand = TYPE_SHUTDOWN;
+	command = TYPE_PROXY;
 	len = sizeof(__u16)*2 + sizeof(__u8)*2;
 	skb = alloc_skb(len+1, GFP_ATOMIC);
 
@@ -189,34 +275,45 @@ void capiproxy_remove_ctr(struct capi_ctr *ctrl);
 	 * happen
 	 */
 
-	ctrl->suspend_output(ctrl);
-	capiproxy_flush_queue(CARD(ctrl->cnr));
+	/*
+	 * maybe.... let's try
+	 */
+	
 	capiproxy_send_message(ctrl, skb);
-	di->detach_ctr(ctrl);
-	CARD(ctrl->cnr)->status = CARD_FREE;
+
+	/*
+	 * We won't do this immediately
+	 * let first the daemon detach!
+	 * 
+	 *  ctrl->suspend_output(ctrl);
+	 *  capiproxy_flush_queue(CARD(ctrl->cnr));
+	 *  capiproxy_send_message(ctrl, skb);
+	 *  di->detach_ctr(ctrl);
+	 *  ((capi20proxy_card*)ctrl->driverdata)->status = CARD_FREE;
+	*/
 }
 
 void capiproxy_reset_ctr(struct capi_ctr *ctrl)
 {
-	capiproxy_card *card = CARD(ctrl->cnr);
-	struct capiproxyctrl_info *cinfo = card->pcapiproxyctrl_info;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 
 	capiproxy_flush_queue(card);
-	capiproxy_remove_ctr(ctrl);
 	ctrl->reseted(ctrl);
 }
 
 static void capiproxy_register_internal(struct capi_ctr *ctrl, __u16 appl,
-                                        capi_register_params *rp)
+                                        struct capi_register_params *rp)
 {
 	struct sk_buff *skb;
 	__u16 len;
-	__u8 command = TYPE_REGISTER_APP; /* Command to daemon to throw together a register
-				    	   * kind of packet to send to the server
-				    	   */
-	__u8 subcommand = 0; /* Tells the daemon this is not an ordinary message */
+	__u8 subcommand = TYPE_REGISTER_APP; /* Command to daemon to throw together a register
+				    	      * kind of packet to send to the server
+				    	      */
+	__u8 command = TYPE_PROXY;	/* Tells the daemon this is not an ordinary message */
 
-	len = sizeof(__u16)*2 + sizeof(__u8)*2) + sizeof(__u32)*3;
+	appl=0;
+	
+	len = sizeof(__u16)*2 + sizeof(__u8)*2 + sizeof(__u32)*3;
 	if(!(skb = alloc_skb(len + 1, GFP_ATOMIC))) {
 		printk(KERN_ERR "capi20proxy card %d: Could not allocate memory", ctrl->cnr);
 		return;
@@ -227,43 +324,33 @@ static void capiproxy_register_internal(struct capi_ctr *ctrl, __u16 appl,
 	CAPIMSG_SETSUBCOMMAND(skb->data, subcommand);
 	CAPIMSG_SETL3C(skb->data, rp->level3cnt);
 	CAPIMSG_SETDBC(skb->data, rp->datablkcnt);
-	CAPIMSG_SETDBC(skb->data, rp->datablklen);
+	CAPIMSG_SETDBL(skb->data, rp->datablklen);
 	capiproxy_send_message(ctrl, skb);
 }
 
 void capiproxy_register_appl(struct capi_ctr *ctrl, 
 				__u16 appl, 
-				capi_register_params *rp)
+				struct capi_register_params *rp)
 {
-	int	max_logical_connections = 0,
-		max_b_data_blocks	= 0,
-		max_b_data_len		= 0,
-		chk			= 0;
-	struct sk_buff *skb;
-	capi_register_params *arp;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
+	capi_register_params arp;
 
-	if (!APPL_IS_FREE(appl)) {
-		printk(KERN_ERR "capi20proxy: Application %d already registered\n", appl);
+	if (!APPL_IS_FREE(card,appl)) {
+		printk(KERN_ERR "capi20proxy card %d: Application %d already registered\n", card->ctrl->cnr, appl);
 		return;
 	}
-	APPL(appl)->applid = appl;
-	arp = &(APPL(appl)->rp);
+	
+	arp.datablkcnt = (rp->datablkcnt > CAPI_MAXDATAWINDOW) ? CAPI_MAXDATAWINDOW : rp->datablkcnt;	
+	arp.datablklen = (rp->datablklen > 1024) ? 1024 : rp->datablklen;	/* why did you write '<' ? */
+	arp.level3cnt  = rp->level3cnt;
 
-	max_b_data_blocks = rp->datablkcnt > CAPI_MAXDATAWINDOW ? CAPI_MAXDATAWINDOW : rp->datablkcnt;	
-	rp->datablkcnt = max_b_data_blocks;
-	max_b_data_len = rp->datablklen < 1024 ? 1024 : rp->datablklen;
-	rp->datablklen = max_b_data_len;
-
-	arp->level3cnt  = rp->level3cnt;
-	arp->datablkcnt = rp->datablkcnt;
-	arp->datablklen = rp->datablklen;
-
-	capiproxy_register_internal(ctrl, appl, arp);
-	APPL_MARK_USED(appl);
-	ctrl->appl_registered(ctrl, appl);
+	capiproxy_register_internal(ctrl, appl, &arp);
+	APPL_MARK_WAITING(card,appl);
+	printk(KERN_NOTICE "capi20proxy card %d: Application %d registering\n",card->ctrl->cnr, appl);
 }
 
 /*
+ * Gerald:
  * I think if there is an error registering the application
  * then the daemon should send a message to this module
  * reporting the error because as far as kcapi is concerned,
@@ -272,18 +359,28 @@ void capiproxy_register_appl(struct capi_ctr *ctrl,
  * One problem is:- kcapi may send messages from that application
  * before it is confirmed.  The go-around I thought of was to
  * include the variable "status" in the applications structure.
+ *
+ * Adam:
+ * My idea is to not call ctrl->appl_registered before the application is
+ * registered.
+ * The deamon will call an ioctl that makes this module call appl_registered!
  */
 
 void capiproxy_release_appl(struct capi_ctr *ctrl, 
 			    __u16 appl)
 {
-	if(!VALID_APPLID(appl) || APPL_IS_FREE(appl)) {
-		printf(KERN_ERR "capi20proxy card %d: Releasing free application or invalid applid -- %d\n", ctrl->cnr, appl);
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
+	
+	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl)) {
+		ctrl->appl_released(ctrl, appl);
+		printk(KERN_ERR "capi20proxy card %d: Releasing free application or invalid applid -- %d\n", ctrl->cnr, appl);
 		return;
 	}
 	capiproxy_release_internal(ctrl, appl);
-	APPL_MARK_FREE(appl);	
+	APPL_MARK_FREE(card,appl);
+	//DEC_MOD_USE_COUNT;	
 	ctrl->appl_released(ctrl, appl);
+	printk(KERN_NOTICE "capi20proxy card %d: Application released %d\n", ctrl->cnr, appl);
 }
 
 static void capiproxy_release_internal(struct capi_ctr *ctrl, 
@@ -295,12 +392,12 @@ static void capiproxy_release_internal(struct capi_ctr *ctrl,
 	__u8 subcommand;
 
 	/*
-	 * A sub command of zero should tell the daemon that this
+	 * A command of zero should tell the daemon that this
 	 * is not an ordinary capi message.
 	 */
 
-	command 	= TYPE_RELEASE_APP;
-	subcommand 	= 0;
+	command 	= TYPE_PROXY;
+	subcommand 	= TYPE_RELEASE_APP;
 
 	len = sizeof(__u16)*2 + sizeof(__u8)*2;
 	if(!(skb = alloc_skb(len+1, GFP_ATOMIC))) {
@@ -314,38 +411,31 @@ static void capiproxy_release_internal(struct capi_ctr *ctrl,
 	capiproxy_send_message(ctrl, skb);
 }
 
-int capiproxy_capi_release(capi20proxy *card)
-{
-	struct capi_ctr *ctrl;
-
-	ctrl = card->ctrl;
-	printk(KERN_NOTICE "capi20proxy: %d released", ctrl->cnr);
-	capiproxy_remove_ctr(ctrl);
-	return 0;
-}
-
+/* messages coming from kernelcapi */
 void capiproxy_send_message(struct capi_ctr *ctrl,
 				struct sk_buff *skb)
 {
-	capi20proxy *this_card = CARD(ctrl->cnr);;
-	capiproxyctrl_info *cinfo = this_card->pcapiproxyctrl_info;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	__u16 applid;
 
 	applid = CAPIMSG_APPID(skb->data);
 
 	switch(CAPIMSG_COMMAND(skb->data)) {
 		case CAPI_DISCONNECT_B3_RESP:
-			ctrl->free_ncci(ctrl, applid,
-					CAPIMSG_NCCI(skb->data));
+			ctrl->free_ncci(ctrl, applid, CAPIMSG_NCCI(skb->data));
 			break;
 		default:
 			break;
 	}	
 
-	skb_queue_tail(&this_card->outgoing_queue, skb);
-	spin_lock(cinfo->ctrl_lock);
-	cinfo->sk_pending += 1;
-	spin_unlock(cinfo->ctrl_lock);
+	spin_lock(&(card->ctrl_lock));
+	skb_queue_tail(&(card->outgoing_queue), skb);
+	card->sk_pending += 1;
+	spin_unlock(&(card->ctrl_lock));
+
+	printk(KERN_NOTICE "capi20proxy card %d: message received from kcapi", ctrl->cnr);
+	
+	/* what does this do??? */
 	queue_task(&tq_send_notify, &tq_immediate);
 	mark_bh(IMMEDIATE_BH);
 }
@@ -361,20 +451,20 @@ int capiproxy_load_firmware(struct capi_ctr *ctrl,
 	return 0;
 }
 
-char *capiproxy_procinfo(struct capi_ctr *ctrl);
+char *capiproxy_procinfo(struct capi_ctr *ctrl)
 {
-	struct capiproxyctrl_info *cinfo = (capiproxyctrl_info *)ctrl->driverdata;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 
-	if (!cinfo)
+	if (!card)
 		return "";
 
-	sprintf(cinfo->infobuf, "%s %s 0x%x",
-		cinfo->cardname[0] ? cinfo->cardname : "-",
-		cinfo->version[CAPIPROXY_VER_DRIVER] ? cinfo->version[CAPIPROXY_VER_DRIVER] : "-",
-		cinfo->card ? cinfo->card : 0x0
+	sprintf(card->infobuf, "%s %s 0x%x",
+		card->cardname[0] ? card->cardname : "-",
+		card->version[CAPIPROXY_VER_DRIVER] ? card->version : "-",
+		card ? (__u32)(void*)card : 0x0
 		);
 		
-	return cinfo->infobuf;
+	return card->infobuf;
 }
 
 int capiproxy_read_proc(char *page,
@@ -384,22 +474,21 @@ int capiproxy_read_proc(char *page,
 			int *end,
 			struct capi_ctr *ctrl)
 {
-	struct capiproxyctrl_info *cinfo = ctrl->driverdata;
-	char *s;
+	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	int len = 0;
 	
-	len += sprintf(page+len, "%-16s %s\n", "name", cinfo->cardname);
+	len += sprintf(page+len, "%-16s %s\n", "name", card->cardname);
 	len += sprintf(page+len, "%-16s 0x0\n", "io");
 	len += sprintf(page+len, "%-16s -\n", "irq");
 	len += sprintf(page+len, "%-16s %s\n", "type", "Virtual Card :-)");
 
-	if ((s = cinfo->version[CAPIPROXY_VER_DRIVER]) != 0)
-		len += sprintf(page+len, "%-16s %s\n", "ver_driver", s);
+	if (card->version[CAPIPROXY_VER_DRIVER] != 0)
+		len += sprintf(page+len, "%-16s %s\n", "ver_driver", card->version);
 
-	len += sprintf(page+len, "%-16s %s\n", "cardname", cinfo->cardname);
+	len += sprintf(page+len, "%-16s %s\n", "cardname", card->cardname);
 
 	if (off+count >= len)
-		*eof = 1;
+		*end = 1; /* eof? */
 	if (len < off)
 		return 0;
 
@@ -407,28 +496,13 @@ int capiproxy_read_proc(char *page,
 	return ((count < len-off) ? count : len-off);
 }
 
-static struct capi_driver capiproxy_driver = {
-	"capi20proxy",
-	"1.2",
-	capiproxy_load_firmware,
-	capiproxy_reset_ctr,
-	capiproxy_remove_ctr,
-	capiproxy_register_appl,
-	capiproxy_release_appl,
-	capiproxy_send_message,
-	capiproxy_procinfo,
-	capiproxy_read_proc,
-	0,				/* Use standard driver read proc */
-	0,				/* No add card function */
-};
-
-static void push_user_buffer(void **dest, void **src, int len)
+static void push_user_buffer(void *dest, void **src, int len)
 {
-	copy_from_user(*dest, *src, len);
-	*dest += len; 
+	copy_from_user(dest, *src, len);
+	*src += len; 
 }
 
-static int capiproxy_ioctl(struct inode *inode, 
+int capiproxy_ioctl(struct inode *inode, 
 				struct file *file, 
 				unsigned int ioctl_num,
 				unsigned long ioctl_param)
@@ -436,7 +510,7 @@ static int capiproxy_ioctl(struct inode *inode,
 	char *temp = (char *)ioctl_param;
 	capi20proxy_card *card = (capi20proxy_card *)file->private_data;
 	struct capi_ctr *ctrl  = card->ctrl;
-	__u16 applid, len;
+	__u16 appl, len;
 
 	switch(ioctl_num) {
 		case IOCTL_SET_DATA:
@@ -447,28 +521,39 @@ static int capiproxy_ioctl(struct inode *inode,
 			copy_from_user(&len, temp, sizeof(int));
 			temp += sizeof(int);
 
-			if (len < CAPI_MANUFACTURER_LEN + CAPI_VERSION_LEN + CAPI_SERIAL_LEN + CAPI_PROFILE_LEN)
+			if (len < CAPI_MANUFACTURER_LEN + (sizeof(struct capi_version)) + CAPI_SERIAL_LEN + (sizeof(struct capi_profile)))
 				return -EMSGSIZE;
 
-			push_user_buffer((void **)(&(ctrl->manu)),
+			push_user_buffer((void *)(ctrl->manu),
 					(void **)(&temp),
 					CAPI_MANUFACTURER_LEN);
-			push_user_buffer((void **)(&(ctrl->version)),
+			push_user_buffer((void *)(&(ctrl->version)),
 					(void **)(&temp),
-					CAPI_VERSION_LEN);
-			push_user_buffer((void **)(&(ctrl->serial)),
+					sizeof(struct capi_version));
+			push_user_buffer((void *)(ctrl->serial),
 					(void **)(&temp),
 					CAPI_SERIAL_LEN);
-			push_user_buffer((void **)(&(ctrl->profile)),
+			push_user_buffer((void *)(&(ctrl->profile)),
 					(void **)(&temp),
-					CAPI_PROFILE_LEN);
+					sizeof(struct capi_profile));
 			ctrl->ready(ctrl);
+			printk(KERN_NOTICE "capi20proxy card %d: controller ready", ctrl->cnr);
 			return 0;
 		}
 		case IOCTL_ERROR_REGFAIL:
 		{
-			applid = CAPIMSG_APPID(temp);			
+			push_user_buffer((void *)&appl,(void **)(&temp),2);			
+			APPL_MARK_REVOKED(card,appl);
 			ctrl->appl_released(ctrl, appl);
+			printk(KERN_NOTICE "capi20proxy card %d: deamon failed to register application %d", ctrl->cnr, appl);
+			return 0;
+		}
+		case IOCTL_APPL_REGISTERED:
+		{
+			ctrl->appl_registered(ctrl, appl);
+			APPL_MARK_CONFIRMED(card,appl);
+			//INC_MOD_USE_COUNT;
+			printk(KERN_NOTICE "capi20proxy card %d: daemon confirmed application %d", ctrl->cnr, appl);
 			return 0;
 		}
 		default:
@@ -476,22 +561,18 @@ static int capiproxy_ioctl(struct inode *inode,
 	}
 }
 
+/* and what does this do? */
 static void handle_send_msg(void *dummy)
 {
 	int i;
-	capi20proxy *card;
-	capiproxyctrl_info *cinfo;
+	capi20proxy_card *card;
 
-	for (i = 0; i < CAPI_MAXCONTR; i++) {
+	for (i = 0; i < CAPIPROXY_MAXCONTR; i++) {
 		card = &cards[i];
 		if(card->status == CARD_FREE) 
 			continue;
 
-		cinfo = card->pcapiproxyctrl_info;
-		if(!cinfo) 
-			continue;
-
-		if(cinfo->sk_pending)
+		if(card->sk_pending)
 			wake_up_interruptible(&card->wait_queue_out);
 	}
 
@@ -509,54 +590,58 @@ static void handle_send_msg(void *dummy)
  * SERVER's CAPI
  */
 
-static int capiproxy_read(struct file *file,
+/* static ? */
+ssize_t capiproxy_read(struct file *file,
 				char *buffer,
 				size_t length,
 				loff_t *offset)
 {
 	capi20proxy_card *card = (capi20proxy_card *)file->private_data;
-	struct capi_ctr *ctrl = card->ctrl;
-	capiproxyctrl_info *cinfo = card->pcapiproxyctrl_info;
-	capiproxy_appl *this_application;
 	struct sk_buff *skb;
 	int retval;
-	__u16 applid;
+	__u16 appl;
 	size_t copied;
 
-	if (!cinfo->sk_pending) {
+	if (!card->sk_pending) {
 		if(file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 	
 		for (;;) {
 			interruptible_sleep_on(&card->wait_queue_out);
 
-			if (cinfo->sk_pending)
+			if (card->sk_pending)
 				break;
 			if (signal_pending(current))
 				break;
 		}
 
-		if (!cinfo->sk_pending)
+		if (!card->sk_pending)
 			return -EINTR;
 	}
 	skb = skb_dequeue(&card->outgoing_queue); 
 
 	if (skb->len > length) {
-		skb_queue_head(&card->outgoing_queue);
+		skb_queue_head(&card->outgoing_queue,skb);
 		return -EMSGSIZE;
 	}
 
-	applid = CAPIMSG_APPID(skb->data);
-	this_application = APPL(applid);
+	if(skb->len < 6) {
+		/* message ist too short take the next one */
+		printk(KERN_WARNING "capi20proxy: too short message dropped");
+		return capiproxy_read(file,buffer,length,offset);
+	}
+		
+
+	appl = CAPIMSG_APPID(skb->data);
 
 	/*
 	 * If this is a valid capi message (the subcommand wouldn't be zero)
 	 * then we check on the application in question
 	 */
-	if (CAPIMSG_SUBCOMMAND(skb->data)) {
-		switch(this_application->status) {
+	if (CAPIMSG_COMMAND(skb->data)) {
+		switch(APPL(card,appl)) {
 			case APPL_WAITING:
-				skb_queue_head(&card->outgoing_queue);
+				skb_queue_head(&card->outgoing_queue,skb);
 				return -EAGAIN;
 			case APPL_CONFIRMED:
 				break;
@@ -570,15 +655,16 @@ static int capiproxy_read(struct file *file,
 
 	retval = copy_to_user(buffer, skb->data, skb->len);
 	if(retval) {
-		skb_queue_head(&card->outgoing_queue);
+		skb_queue_head(&card->outgoing_queue,skb);
+		printk(KERN_ERR "capi20proxy: error %x in copy_to_user()",retval);
 		return retval;
 	}
 	copied = skb->len;
 	kfree_skb(skb);
-	spin_lock(cinfo->ctrl_lock);
+	spin_lock(&(card->ctrl_lock));
         card->sk_pending -= 1;
-	cinfo->out_sk++;
-	spin_unlock(cinfo->ctrl_lock);
+	card->out_sk++;
+	spin_unlock(&(card->ctrl_lock));
 	return copied;
 }
 
@@ -586,187 +672,163 @@ static int capiproxy_read(struct file *file,
  * Messages from the daemon
  */
 
-static int capiproxy_write(struct file *file,
-			   char *buffer,
+ssize_t capiproxy_write(struct file *file,
+			   const char *buffer,
 			   size_t length,
-			   loff_t offset)
+			   loff_t *offset)
 {
-        capi20proxy_card *card = (capi20proxy_card *)file->private_data;
+	capi20proxy_card *card = (capi20proxy_card *)file->private_data;
         struct capi_ctr *ctrl  = card->ctrl;
-	struct capiproxyctrl_info *cinfo = card->pcapiproxyctrl_info;
 	struct sk_buff *skb;
-	capiproxy_appl *this_application;
-	int len;
-	__u16 applid;
+	__u16 appl;
+	__u32 ncci;
 	unsigned char *writepos;
 
-	if(!ctrl)
-		return -ENOTREG;
+	if(card->status!=CARD_RUNNING)
+		return -1;
 
-	copy_from_user(&len, buffer, sizeof(int));
-	buffer += sizeof(int);
+	/* don't we get the length from the legth parameter? */
+	if(!(skb = alloc_skb(length+1, GFP_ATOMIC))) {
+		printk(KERN_ERR "capi20proxy card %d: Could not allocate memory", ctrl->cnr);
+		return -1;
+	}
+	
+	writepos = skb_put(skb, length);
+	copy_from_user(writepos, buffer, length); 
 
-	skb = alloc_skb(len + CAPI_MSG_BASELEN, GFP_ATOMIC);
-	writepos = skb_put(skb, len);
-	copy_from_user(writepos, buffer, len); 
+	appl = CAPIMSG_APPID(skb->data);
+	ncci = CAPIMSG_NCCI(skb->data);
 
-	applid = CAPIMSG_APPID(skb->data);
-	this_application = APPL(applid);
+	/* map the controller id */
+	
+	ncci &=  0xFFFFFF80;
+	ncci += ctrl->cnr;
 	
 	switch(CAPIMSG_COMMAND(skb->data)) {
 		case CAPI_CONNECT_B3_CONF:
-			ctrl->new_ncci(ctrl,
-					applid,
-					CAPIMSG_NCCI(skb->data),
-					this_application->.rp.datablkcnt);
-			break;
 		case CAPI_CONNECT_B3_IND:
 			ctrl->new_ncci(ctrl,
-					applid,
-					CAPIMSG_NCCI(skb->data),
-					this_application->.rp.datablkcnt);
+					appl,
+					ncci,
+					CAPI_MAXDATAWINDOW);
 			break;
 		default:
 			break;
 	}
 
-	spin_lock(cinfo->ctrl_lock);
-	cinfo->in_sk++;
-	spin_unlock(cinfo->ctrl_lock);
-	ctrl->handle_capimsg(ctrl, applid, skb);
+	spin_lock(&(card->ctrl_lock));
+	card->in_sk++;
+	spin_unlock(&(card->ctrl_lock));
+	ctrl->handle_capimsg(ctrl, appl, skb);
+	return length;
 }
-
-/*
- * This function is there only if the question 
- * just before capiproxy_open is justified
- */
 
 static int capiproxy_find_free_id()
 {
 	int i;
 
-	for (i = 0; i < CAPI_MAXCONTR; i++) {
-		if(!VALID_CARD(i))
+	for (i = 0; i < CAPIPROXY_MAXCONTR; i++) {
+		if(cards[i].status==CARD_FREE)
 			return i;
 	}
 	return -1;
 }
 
 /*
- * The daemon, once again shall handle mapping the
- * controller ids (between the CLIENT and SERVER capi
- * implementations.
+ * The daemon will have to map controller ids in the messages
+ * he gets from the module. The module cannot know which
+ * controller on the server the daemon uses.
+ * But messages coming from the daemon.to the module need not
+ * to have mapped controller ids. They will be adjusted by the module!
  */
 
-static int capiproxy_open(struct inode *inode, struct file *file)
+int capiproxy_open(struct inode *inode, struct file *file)
 {
 	int id;
 	capi20proxy_card *card;
-	capiproxyctrl_info *cinfo;
 	struct capi_ctr *ctrl;
 
+	ctrl = card->ctrl;
 	id = capiproxy_find_free_id();
 	if(id == -1) {
-		printk(KERN_ERR "%s: no free controllers left", DRIVERNAME);
+		printk(KERN_ERR "capi20proxy: no free controllers left");
 		return -1;
 	}
 
-	card = CARD(id);
-	cinfo = card->pcapiproxyctrl_info;
+	card=&cards[id];
 
+	capiproxy_init_appls(card);
+	
 	card->status = CARD_RUNNING;
 	skb_queue_head_init(&card->outgoing_queue);
 	init_waitqueue_head(&card->wait_queue_out);
-	sprintf(cinfo->cardname, "%s", CARDNAME);
-	cinfo->ctrl_lock = SPIN_LOCK_UNLOCKED;
-	cinfo->versionlen = 3;
-	sprintf(cinfo->versionbuf, "%s", proxy_version);
-	cinfo->version[CAPIPROXY_VER_DRIVER] = &(cinfo->versionbuf[0]);	
-	cinfo->card = card;
+	
+	sprintf(card->cardname, "%s", CARDNAME);
+	card->ctrl_lock = SPIN_LOCK_UNLOCKED;
+	card->versionlen = CAPIPROXY_VERSIONLEN;
+	sprintf(card->version, "%s", capiproxy_version);
 
 	spin_lock(&kernelcapi_lock);
-	card->ctrl = di->attach_ctrl(capiproxy_driver, DRIVERNAME, (void *)cinfo);
-	ctrl = card->ctrl;
-	card->ctrl_id = ctrl->cnr; 	
+	card->ctrl = di->attach_ctr(&capiproxy_driver, DRIVERNAME, (void*)card);
 	spin_unlock(&kernelcapi_lock);
 
-	file->private_data = (capi20proxy_card *)card;
+	file->private_data = (void*)card;
 	MOD_INC_USE_COUNT;
 	return 0;
 }   
 
-static int capiproxy_release(struct inode *inode, struct file *file)
+int capiproxy_release(struct inode *inode, struct file *file)
 {
 	capi20proxy_card *card;
-	struct capiproxyctrl_info *cinfo;
 	struct capi_ctr *ctrl;
 
 	card = (capi20proxy_card *)file->private_data;
-	cinfo = card->pcapiproxyctrl_info;
 	ctrl = card->ctrl;
 
-	capiproxy_remove_ctr(ctrl);
+	/*
+	 * should this not be done somehow by kernelcapi?
+	 */
 
+	printk(KERN_NOTICE "capi20proxy: removing Controller %d", ctrl->cnr);
+	
+	ctrl->suspend_output(ctrl);
+	capiproxy_flush_queue(card);
+	di->detach_ctr(ctrl);
+	
 	file->private_data 	= NULL;
 	card->status		= CARD_FREE;
 	card->ctrl		= NULL;
 
-	printk(KERN_NOTICE "capi20proxy: Controller %d released", card->ctrl_id);
+	/*
+	 * Should we unregister all apps?
+	 */
+
+	printk(KERN_NOTICE "capi20proxy: Controller %d released", ctrl->cnr);
 	MOD_DEC_USE_COUNT;
 	return 0;
 }
 
-static struct file_operations capiproxy_fops = {
-	owner:		THIS_MODULE,
-	llseek:		NULL,
-        read:		capiproxy_read,
-	write:		capiproxy_write,
-	poll:		NULL,
-	ioctl:		capiproxy_ioctl,
-	open:		capiproxy_open,
-	flush:		NULL,
-	release:	capiproxy_release,
-	lock:		NULL
-};
-
-static struct tq_task tq_send_notify = {
-	NULL,
-	0,
-	handle_send_msg,
-	NULL,
-};
-
-static void capiproxy_init_cards()
+static void capiproxy_init_cards(void)
 {
 	int i;
 	capi20proxy_card *card;
 
-	for (i = 0; i < CAPI_MAXCONTR; i++) {
-		card = CARD(i);
+	for (i = 0; i < CAPIPROXY_MAXCONTR; i++) {
+		card = &cards[i];
 		memset((void *)card, 0, sizeof(capi20proxy_card));
-		card->ctrl_id = i;
 		card->status = CARD_FREE;
 		card->ctrl = NULL;
 	}
 }
 
-static void capiproxy_init_appls()
+static void capiproxy_init_appls(capi20proxy_card *card)
 {
-	int i;
-	capiproxy_appl *appl;
-	
-	for (i = 0; i < CAPI_MAXAPPL; i++) {	
- 		appl = APPL(i);
-		memset((void *)appl, 0, sizeof(capiproxy_appl));
-		appl->appid = i;
-		appl->status = APPL_WAITING;
-	}	
+	memset((void *)card->applications, APPL_FREE, CAPI_MAXAPPL);
 }
 
-static int __init capiproxy_init()
+int __init capiproxy_init(void)
 {
 	capiproxy_init_cards();
-	capiproxy_init_appls();
 	init_waitqueue_head(&rmmod_queue);
 
 	register_chrdev(CAPIPROXY_MAJOR, DRIVERNAME, &capiproxy_fops);
@@ -775,26 +837,29 @@ static int __init capiproxy_init()
 	sprintf(capiproxy_driver.name, "capi20proxy");
 	sprintf(capiproxy_driver.revision, "%s", main_revision);
 	di = attach_capi_driver(&capiproxy_driver);
-	spin_unlock(&kernelcapi_lock)
+	spin_unlock(&kernelcapi_lock);
 
 	if (!di)
+	{
 		printk(KERN_ERR "capi20proxy: Load of driver failed\n");
-
-	printk(KERN_NOTICE "%s loaded\n", DRIVERNAME);
-	return (0);
+		return -1;
+	} else {
+		printk(KERN_NOTICE "%s loaded\n", DRIVERNAME);
+		return 0;
+	}
 }
 
-static void __exit capiproxy_exit()
+void __exit capiproxy_exit(void)
 {
 	int i;
-	capi20proxy *card;
+	capi20proxy_card *card;
 	struct capi_ctr *ctrl;
 
-	for(i = 0; i < CAPI_MAXCONTR; i++) {
-		if (!VALID_CARD(i))
+	for(i = 0; i < CAPIPROXY_MAXCONTR; i++) {
+		if (cards[i].status==CARD_FREE)
 			continue;
 
-		card = CARD(i);
+		card = &cards[i];
 		ctrl = card->ctrl;
 		if (!ctrl)
 			continue;
@@ -808,7 +873,7 @@ static void __exit capiproxy_exit()
 
 	unregister_chrdev(CAPIPROXY_MAJOR, DRIVERNAME);
 
-	detach_capi_driver(di);
+	detach_capi_driver(&capiproxy_driver);
 	printk(KERN_NOTICE "%s unloaded\n", DRIVERNAME);
 }
 
