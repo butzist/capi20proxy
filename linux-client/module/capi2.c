@@ -1,3 +1,18 @@
+/*
+ * Capi 2.0 Linux Kernel module
+ *
+ * Written by Matt Wright (at the moment, just by me)
+ *
+ * This module is released under the GNU Public License.
+ * Copyright (c) Matt Wright 2002
+ *
+ * Changelog:
+ * 
+ *  14 Feb 2002: Just laid down the base module code. At the moment all
+ *  it does is load and unload.
+ *
+*/
+
 #include <linux/module.h>
 
 #include <linux/config.h>
