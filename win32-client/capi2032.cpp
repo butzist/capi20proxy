@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.13  2002/05/12 06:50:46  butzist
+ * changed release version
+ *
  * Revision 1.12  2002/05/12 06:24:06  butzist
  * added binaries and disabled timeout
  *
@@ -590,7 +593,7 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 
 	while(*answer==NULL)
 	{
-		if((timeout==-1) || (--timeout)) // if timeout occurs
+		if((timeout!=-1) || (--timeout)) // if timeout occurs
 		{
 			*answer=ILLEGAL_ANSWER;
 			removeFromHash(msgId);
