@@ -439,7 +439,7 @@ int init_module()
 	}
 	infobuffer.length=sizeof(struct _c2p_init_data)-sizeof(int);
 	
-	node=open("/dev/capiproxy", O_NONBLOCK);
+	node=open("/dev/capiproxy", O_RDWR | O_NONBLOCK);
 	ioctl(node,IOCTL_SET_DATA,&infobuffer);
 
 	return 1;
@@ -624,8 +624,6 @@ int main(void)
 	ret=init_socket();
 	ret=init_module();
 
-	
-	
 	while(!c2p_shutdown) {
 		int len;
 		//__u8 cmd,subcmd;
