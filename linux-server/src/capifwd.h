@@ -27,10 +27,12 @@
 #include <arpa/inet.h>
 #include <linux/capi.h>
 #include <unistd.h>
+
+// This one is my favourite: we *need* libcapi20....
 #include <capi20.h>
+
 #include <syslog.h>
 #include <time.h>
-#include <pthread.h>
 #include <errno.h>
 #include <signal.h>
 #include <wait.h>
@@ -39,7 +41,18 @@
 
 #include "protocol.h"
 
-#define __PORT 6674
+#include "config/config.h"
+//#include "auth/ipfilter.h"
+
+
+
+#define _progname_long "capi20proxy/capifwd daemon"
+#define _version "0.6.3"
+
+
+
+
+
 #define	_PACKET_SIZE 10000
 
 #define APPL_ID(msg)	(*((unsigned int*)(((char*)msg)+2)))
@@ -54,6 +67,8 @@
 // version things.
 #define MY_MAJOR 1
 #define MY_MINOR 1
+
+
 
 
 /////////////////
@@ -83,6 +98,12 @@ void SET_CTRL(char* _msg, unsigned char _ctrl);
 
 
 //////////// NETWORKING VARIABLES //////////////////////////////////////////////////////////////
+
+int port;
+int timeout;
+char *configfile;
+
+
 int sc;				                // local socket descriptor
 int sock;			                // remote socket descriptor
 struct sockaddr_in local_addr;      // local socket properties
@@ -109,9 +130,6 @@ struct _client_info {
 } client_info;
 
 
-// Multi-threading mutex. kind of futile nowadays.
- pthread_mutex_t smtx;
-
 
 
 int quit( int ret );
@@ -120,8 +138,9 @@ int verify_session_id( unsigned id );
 
 void sigchild(int signal);
 void sigparent(int signal);
-
 int become_daemon();
+
+
 
 
 //////////////////////////////////////////////////

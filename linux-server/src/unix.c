@@ -89,6 +89,20 @@ void sigchild(int signal)
 	}
 }
 
+// SIGCHLD handler 
+//
+
+void sigchld( int signal) 
+{
+	int pid;
+	pid = waitpid(-1, NULL, WNOHANG);
+	while (pid > 0) {
+		pid = waitpid(-1, NULL, WNOHANG);
+	}
+
+}
+
+
 int become_daemon() {
 
 	// fork() so the parent can exit
@@ -127,9 +141,10 @@ int become_daemon() {
 	signal(SIGHUP, sigparent);
 	signal(SIGTERM, sigparent);
 	signal(SIGUSR1, sigparent);
-
-  	openlog ("capi20proxy",LOG_PID, LOG_DAEMON);
-  	syslog ( LOG_NOTICE, "capi20proxy server started.");
+	signal(SIGCHLD, sigchld);
+	
+  	openlog ("capifwd",LOG_PID, LOG_DAEMON);
+  	syslog ( LOG_NOTICE, "capifwd server started.");
 
 	return 0;
 }
