@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.7  2002/03/29 07:52:32  butzist
+ * seems to work (got problems with DATA_B3)
+ *
  * Revision 1.6  2002/03/22 14:38:30  butzist
  * lol, I uploaded an old version yesterday. Now this is the new one.
  * At least it causes no compiler errors
@@ -54,7 +57,7 @@ SOCKET socke;
 int max_timeout=-1, timeout=0;
 HANDLE receiver;
 evlhash* hash_start=NULL;
-CRITICAL_SECTION hash_mutex, socket_mutex;
+CRITICAL_SECTION hash_mutex, socket_mutex, dispatch_mutex;
 UINT session_id=0;
 int onhash=0;
 
@@ -101,6 +104,7 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		InitializeCriticalSection(&hash_mutex);
 		InitializeCriticalSection(&socket_mutex);
+		InitializeCriticalSection(&dispatch_mutex);
 
 		DWORD thid;
 		receiver=CreateThread(NULL,1024,messageDispatcher,NULL,0,&thid);
@@ -127,6 +131,7 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		DeleteCriticalSection(&hash_mutex);
 		DeleteCriticalSection(&socket_mutex);
+		DeleteCriticalSection(&dispatch_mutex);
 
 		WSACleanup();
 		break;
@@ -271,6 +276,7 @@ DWORD sendRequest(char* msg)
 {
 	EnterCriticalSection(&socket_mutex);
 	DWORD err=send(socke,msg,((REQUEST_HEADER*)msg)->message_len,0);
+	free((void*)msg);
 	LeaveCriticalSection(&socket_mutex);
 	return err;
 }
@@ -437,10 +443,12 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 	*answer=NULL;
 	addToHash(msgId,answer,thread);
 	sendRequest(request);
-	if(getDataPtrFromMsgId(msgId)!=NULL)
+	
+	while(*answer==NULL)
 	{
-		SuspendThread(GetCurrentThread());
+		Sleep(1);	// Ok, the "beautiful" method didn't work :-( brute force RULZ!
 	}
+
 
 	return (DWORD)*answer;
 }
@@ -451,10 +459,8 @@ void dispatchMessage(char* msg)
 	HANDLE thread=getThreadFromMsgId(header->message_id);
 	char** data=getDataPtrFromMsgId(header->message_id);
 
-	*data=msg;
 	removeFromHash(header->message_id);
-	ResumeThread(thread);
-	CloseHandle(thread);
+	*data=msg;
 }
 
 DWORD WINAPI messageDispatcher(LPVOID param)
@@ -464,9 +470,17 @@ DWORD WINAPI messageDispatcher(LPVOID param)
 	while(true)
 	{
 		void* msg=malloc(_MSG_BUFFER);
+		if(msg==NULL)
+		{
+			break;
+		}
+
 		err=recv(socke,(char*)msg,_MSG_BUFFER,0);
 		if(err==SOCKET_ERROR || err<sizeof(ANSWER_HEADER))
 		{
+			if(err==0)
+				break;
+
 			free(msg);
 		} else {
 			dispatchMessage((char*)msg);
@@ -517,7 +531,6 @@ DWORD APIENTRY CAPI_REGISTER(DWORD MessageBufferSize,
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -578,7 +591,6 @@ DWORD APIENTRY CAPI_RELEASE(DWORD ApplID)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -662,7 +674,6 @@ DWORD APIENTRY CAPI_PUT_MESSAGE(DWORD ApplID,
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -723,7 +734,6 @@ DWORD APIENTRY CAPI_GET_MESSAGE(DWORD ApplID, LPVOID *ppCAPIMessage)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -823,7 +833,6 @@ DWORD APIENTRY CAPI_WAIT_FOR_SIGNAL(DWORD ApplID)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -882,7 +891,6 @@ void APIENTRY CAPI_GET_MANUFACTURER(char* szBuffer)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -946,7 +954,6 @@ DWORD APIENTRY CAPI_GET_VERSION(DWORD * pCAPIMajor,
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -1010,7 +1017,6 @@ DWORD APIENTRY CAPI_GET_SERIAL_NUMBER(char* szBuffer)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -1073,7 +1079,6 @@ DWORD APIENTRY CAPI_GET_PROFILE(LPVOID szBuffer,
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
@@ -1134,7 +1139,6 @@ DWORD APIENTRY CAPI_INSTALLED(void)
 	char* answer; // The pointer that will point to the answer
 
 	sendAndReceive(id,request,&answer);
-	free((void*)request);
 	// when the function terminates we have received a message
 
 	if(answer==NULL)	// or maybe not
