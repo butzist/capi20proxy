@@ -89,7 +89,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,6,0,2
+ FILEVERSION 0,6,2,0
  PRODUCTVERSION 0,6,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -108,7 +108,7 @@ BEGIN
             VALUE "Comments", "\0"
             VALUE "CompanyName", "http://sourceforge.net/projects/capi20proxy/\0"
             VALUE "FileDescription", "capi20server\0"
-            VALUE "FileVersion", "0, 6, 0, 2\0"
+            VALUE "FileVersion", "0, 6, 2, 0\0"
             VALUE "InternalName", "capi20server\0"
             VALUE "LegalCopyright", "Copyright © 2002\0"
             VALUE "LegalTrademarks", "\0"
