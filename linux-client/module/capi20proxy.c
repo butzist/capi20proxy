@@ -48,6 +48,7 @@
 #include "capi20proxy.h"
 
 #define APPL(card,a)			(card->applications[(a)-1])
+#define MAX_SK_PENDING		32
 
 EXPORT_NO_SYMBOLS;
 
@@ -392,8 +393,14 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 		default:
 			break;
 	}	
-
-	spin_lock(&(card->ctrl_lock));
+	
+	if(card->sk_pending>MAX_SK_PENDING) {
+		printk(KERN_ERR "%s card %d: message buffer overflow. message dropped.\n", DRIVERNAME, ctrl->cnr);
+		kfree_skb(skb);
+		return;
+	}
+	
+	spin_lock(&(card->ctrl_lock));	
 	skb_queue_tail(&(card->outgoing_queue), skb);
 	card->sk_pending += 1;
 	spin_unlock(&(card->ctrl_lock));
@@ -595,16 +602,23 @@ ssize_t capiproxy_read(struct file *file,
 	if(skb->len < 6) {
 		/* message ist too short take the next one */
 		printk(KERN_WARNING "%s: too short message dropped\n", DRIVERNAME);
+		
+		spin_lock(&(card->ctrl_lock));
+        	card->sk_pending -= 1;
+		spin_unlock(&(card->ctrl_lock));
+		
 		return capiproxy_read(file,buffer,length,offset);
 	}
 		
 
+/*	Mybe we should not check whether the message is valid. Let the daemon do that!
+ 
 	appl = CAPIMSG_APPID(skb->data);
 
-	/*
+	*
 	 * If this is a valid capi message (the command wouldn't be zero)
 	 * then we check on the application in question
-	 */
+	 *
 	if (CAPIMSG_COMMAND(skb->data)!=TYPE_PROXY) {
 		switch(APPL(card,appl)) {
 			case APPL_WAITING:
@@ -619,6 +633,7 @@ ssize_t capiproxy_read(struct file *file,
 				break;
 		}
 	}
+*/
 
 	retval = copy_to_user(buffer, skb->data, skb->len);
 	if(retval) {
