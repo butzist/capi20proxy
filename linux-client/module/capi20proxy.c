@@ -136,9 +136,9 @@ static __u16 system_shutting_down = 0;
 static char *main_revision	= "$Revision$";
 static char *capiproxy_version	= "0.6.1";
 static char *DRIVERNAME		= "capi20proxy";
-static char *DRIVERLNAME	= "Capi 2.0 Proxy Client (http://capi20proxy.sourceforge.net)";
+//static char *DRIVERLNAME	= "Capi 2.0 Proxy Client (http://capi20proxy.sourceforge.net)";
 static char *CARDNAME		= "CAPI Virtual Card";
-static char *MANUFACTURER_NAME	= "http://capi20proxy.sourceforge.net";
+//static char *MANUFACTURER_NAME	= "http://capi20proxy.sourceforge.net";
 
 /* some prototypes */
 void capiproxy_register_appl(struct capi_ctr *ctrl,__u16 appl, struct capi_register_params *rp);
