@@ -19,6 +19,10 @@
 
 /*
  * $Log$
+ * Revision 1.17  2002/05/14 13:24:15  butzist
+ * changed and recompiled
+ * hope this works better
+ *
  * Revision 1.16  2002/05/13 12:12:55  butzist
  * oh no, I can't think today... perhaps now it's right
  *
@@ -93,6 +97,7 @@ evlhash* hash_start=NULL;
 appl_list* registered_apps=NULL;
 CRITICAL_SECTION hash_mutex, socket_mutex, dispatch_mutex, appllist_mutex;
 UINT session_id=0;
+DWORD _port;
 
 BOOL APIENTRY DllMain( HANDLE hModule, 
                        DWORD  ul_reason_for_call, 
@@ -112,14 +117,14 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
 		err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\The Red Guy\\capi20proxy",0,KEY_QUERY_VALUE,&key);
 		if(err!=ERROR_SUCCESS){
-			::MessageBox(NULL,"Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\The Reg Guy\\capi20proxy\"","Error",MB_OK);
+			::MessageBox(NULL,"Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\The Red Guy\\capi20proxy\"","Error",MB_OK);
 			return FALSE;
 		}
 		
 		len=256;
 		err=RegQueryValueEx(key,"server",NULL,NULL,(unsigned char*)ipstr,&len);
 		if(err!=ERROR_SUCCESS){
-			::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\The Reg Guy\\capi20proxy\\server\"","Error",MB_OK);
+			::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\The Red Guy\\capi20proxy\\server\"","Error",MB_OK);
 			return FALSE;
 		}
 		toaddr.S_un.S_addr=inet_addr(ipstr);
@@ -127,9 +132,16 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 		len=64;
 		err=RegQueryValueEx(key,"name",NULL,NULL,(unsigned char*)__myname,&len);
 		if(err!=ERROR_SUCCESS){
-			::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\The Reg Guy\\capi20proxy\\name\"","Error",MB_OK);
+			::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\The Red Guy\\capi20proxy\\name\"","Error",MB_OK);
 			return FALSE;
 		}
+
+		len=4;
+		err=RegQueryValueEx(key,"port",NULL,NULL,(unsigned char*)&_port,&len);
+		if(err!=ERROR_SUCCESS){
+			_port=__PORT;
+		}
+
 
 		RegCloseKey(key);
 
@@ -207,7 +219,7 @@ DWORD initConnection()
 
 	SOCKADDR_IN server;
 	server.sin_family=AF_INET;
-	server.sin_port=htons(__PORT);
+	server.sin_port=htons((unsigned short)_port);
 	server.sin_addr=toaddr;
 
 	err=connect(socke,(SOCKADDR*)&server,sizeof(server));

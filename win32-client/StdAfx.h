@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <winreg.h>
+#include <cpl.h>
 
 // ZU ERLEDIGEN: Verweisen Sie hier auf zusätzliche Header-Dateien, die Ihr Programm benötigt
 
