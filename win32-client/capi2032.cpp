@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.15  2002/05/13 11:58:32  butzist
+ * maybe now it works :-)
+ *
  * Revision 1.14  2002/05/13 11:17:26  butzist
  * found an error (used == instead of !=)
  * because of this incoming messages are deleted immediately
@@ -599,7 +602,7 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 	{
 		if(timeout) // if not timeout disabled (timeout=0)
 		{
-		   if(--timeout) // if timeout occurs
+		   if(--timeout==0) // if timeout occurs
 		    {
 			*answer=ILLEGAL_ANSWER;
 			removeFromHash(msgId);
