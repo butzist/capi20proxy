@@ -40,7 +40,7 @@ int exec_capi_register(void *in_packet) {
 	return_type = capi20_register ( values->maxLogicalConnection, values->maxBDataBlocks, values->maxBDataLen, (unsigned int*) &(head->app_id) );
 	if(return_type==0x0000)
 	{
-		add_app(head->app_id,&registered_apps);
+		add_app(head->app_id,registered_apps);
 	}
 
 	client_info.messageBufferLen = values->messageBufferSize;

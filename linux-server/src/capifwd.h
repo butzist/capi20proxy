@@ -37,6 +37,7 @@
 
 #include <capi20.h>
 #include <linux/capi.h>
+#include <linux/kernelcapi.h>
 
 #include "protocol.h"
 
@@ -51,8 +52,10 @@
 #define CAPI_CMD2(msg)	(*((unsigned char*)(((char*)msg)+5)))
 
 #define MY_MAJOR 1
-#define MY_MINOR 1
+#define MY_MINOR 2
 
+#define STD_AUTH_REQUIRED 1
+#define STD_PORT	6674
 
 int port;
 int timeout;
@@ -83,17 +86,12 @@ struct AUTH_USERPASS_DATA {
 	unsigned passwd_len;
 };
 
-struct appl_list
-{
-	struct appl_list* next;
-	unsigned long ApplID;
-};
-extern struct appl_list* registered_apps;
+extern char registered_apps[];
 
-void add_app(unsigned long  _ApplID, struct appl_list** _list);
-void del_app(unsigned long _ApplID, struct appl_list** _list);
-unsigned long getfirst_app(struct appl_list** _list);
-void release_all(struct appl_list** _list);
+void add_app(unsigned long  _ApplID, char* _list);
+void del_app(unsigned long _ApplID, char* _list);
+unsigned long getfirst_app(char* _list);
+void release_all(char* _list);
 // Set the active controller. Some nice hack by Adam...
 void SET_CTRL(char* _msg, unsigned char _ctrl);
 
@@ -113,6 +111,7 @@ int eval_cmdline(int argc, char* argv[]);
 
 // authentification:
 int up_auth(char *indata);
+int ip_auth();
 int verify_session_id( unsigned id );
 
 // the packet handler functions....

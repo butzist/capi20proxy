@@ -21,75 +21,32 @@
 
 #include "capifwd.h"
 
-struct appl_list* registered_apps;
+char registered_apps[CAPI_MAXAPPL];
 
 
-void add_app(unsigned long  _ApplID, struct appl_list** _list)
+void add_app(unsigned long  _ApplID, char* _list)
 {
-	if(*_list!=NULL)
-	{
-		struct appl_list* list=(*_list);
-		while(list->next)
-		{
-			list=list->next;
-		}
-
-		list->next=(struct appl_list*)malloc(sizeof(struct appl_list));
-
-		list=list->next;
-		list->ApplID=_ApplID;
-		list->next=NULL;
-	} else {
-		(*_list)=(struct appl_list*)malloc(sizeof(struct appl_list));
-		(*_list)->ApplID=_ApplID;
-		(*_list)->next=NULL;
-	}
+	_list[_ApplID]=1;
 }
 
-void del_app(unsigned long _ApplID, struct appl_list** _list)
+void del_app(unsigned long _ApplID, char* _list)
 {
-	if((*_list)!=NULL)
-	{
-		struct appl_list* list=(*_list);
-		struct appl_list* prev=NULL;
+	_list[_ApplID]=0;	
+}
 
-		while(list!=NULL)
-		{
-			if(list->ApplID==_ApplID)
-			{
-				if(prev!=NULL)
-				{
-					prev->next=list->next;
-				} else {
-					(*_list)=list->next;
-				}
-				free((void*)list);
-				return;
-			}
-			prev=list;
-			list=list->next;
+unsigned long getfirst_app(char* _list)
+{
+	int i;
+	for(i=1; i<=CAPI_MAXAPPL; i++) {
+		if(_list[i]!=0) {
+			_list[i]=0;
+			return i;
 		}
 	}
+	return 0;
 }
 
-unsigned long getfirst_app(struct appl_list** _list)
-{
-	if((*_list)==NULL)
-	{
-		return 0;
-	} else {
-		struct appl_list* list=(*_list);
-		unsigned long ret=list->ApplID;
-
-		(*_list)=list->next;
-
-		free((void*)list);
-		return ret;
-	}
-
-}
-
-void release_all(struct appl_list** _list)
+void release_all(char* _list)
 {
 	unsigned long app;
 	while((app=getfirst_app(_list)))

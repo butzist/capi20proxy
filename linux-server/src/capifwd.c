@@ -13,15 +13,17 @@ int main ( int argc, char* argv[] ) {
   	char msg[50];
 	int remote_size,numbytes,sentbytes;
 
-	auth_types = AUTH_NO_AUTH;
+	auth_types = AUTH_BY_IP;
 	local_version.major = MY_MAJOR;
 	local_version.minor = MY_MINOR;
 
 	//set some defaults...  
-	port = 6674;
+	port = STD_PORT;
 	
 	eval_cmdline(argc, argv);
 	become_daemon();
+
+	memset(registered_apps,0,CAPI_MAXAPPL+1);
 
 	if ( ( sc = socket ( AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
    		syslog ( LOG_WARNING, sys_errlist[errno] );
@@ -91,7 +93,8 @@ int main ( int argc, char* argv[] ) {
 			//while(waitpid(-1,NULL,WNOHANG)>0);
 			if ((numbytes = recv( sock, in_packet, _PACKET_SIZE, 0)) < 1) {
 				close (sock);
-				release_all(&registered_apps);	//release the registered applications
+				release_all(registered_apps);	//release the registered applications
+				syslog(LOG_NOTICE, "applications released");
 				// normal shutdown when socket is closed
 				syslog(LOG_NOTICE, sys_errlist[errno]);
 				exit ( 0 );

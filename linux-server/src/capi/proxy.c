@@ -45,11 +45,11 @@ int exec_proxy_helo(void *in_packet) {
 	helo_head->message_type = TYPE_PROXY_HELO;
 	helo_head->app_id = 0;
 	helo_head->session_id = sessionID;
-	helo_head->proxy_error = 0;
+	helo_head->proxy_error = STD_AUTH_REQUIRED ? PERROR_AUTH_REQUIRED : PERROR_NONE;
 	helo_head->capi_error = 0;
 	// Step 3: compose answer packet...
 	helo_re = (struct ANSWER_PROXY_HELO*) (out_packet + sizeof (struct ANSWER_HEADER));
-	strcpy ( helo_re->name,  "CAPI 2.0 Proxy Linux SERVER pre-alpha");
+	strcpy ( helo_re->name,  "CAPI 2.0 Proxy Linux SERVER alpha");
 	helo_re->os = OS_TYPE_LINUX;
 	helo_re->version = local_version;
 	helo_re->auth_type = AUTH_NO_AUTH;		//Authentification not yet supported.
@@ -69,19 +69,29 @@ int exec_proxy_auth(void *in_packet) {
 	struct ANSWER_PROXY_AUTH *body;
 	struct ANSWER_HEADER *head;
 	char *authdata;
-	int noverfy=-1;
-	
-	lenp = (struct REQUEST_PROXY_AUTH*) (in_packet+sizeof(struct REQUEST_HEADER));
-	if ( lenp->auth_len != 0 ) {
-		authdata = (char*) malloc( lenp->auth_len * sizeof(char));
-		memcpy (authdata, (in_packet + sizeof(struct REQUEST_HEADER) + sizeof( struct REQUEST_PROXY_AUTH)), lenp->auth_len );
-		noverfy = up_auth(authdata);
-	}
- 
 	
 	// Step 3: compose return header
 	request = (struct REQUEST_HEADER *) in_packet;
 	head = (struct ANSWER_HEADER*) out_packet;
+	lenp = (struct REQUEST_PROXY_AUTH*) (in_packet+request->header_len);
+	if ( lenp->auth_type & AUTH_USERPASS ) {
+		authdata = (char*) malloc(request->data_len);
+		memcpy (authdata, (in_packet + request->header_len + request->body_len), request->data_len );
+		if(up_auth(authdata)!=-1) {
+			head->proxy_error = PERROR_NONE;
+		} else {
+			head->proxy_error = PERROR_ACCESS_DENIED;
+		}
+	} else if (lenp->auth_type & AUTH_BY_IP) {
+		if(ip_auth()!=-1) {
+			head->proxy_error = PERROR_NONE;
+		} else {
+			head->proxy_error = PERROR_ACCESS_DENIED;
+		}
+	} else {
+		head->proxy_error = PERROR_AUTH_TYPE_NOT_SUPPORTED;
+	}
+	
 	head->header_len = sizeof (struct ANSWER_HEADER);
 	head->body_len = sizeof (struct ANSWER_PROXY_AUTH);
 	head->data_len = 0;
@@ -89,19 +99,17 @@ int exec_proxy_auth(void *in_packet) {
 	head->message_id = request->message_id;
 	head->message_type = TYPE_PROXY_AUTH;
 	head->app_id = 0;
-	if ( noverfy == -1 ) {
+	if (STD_AUTH_REQUIRED && (head->proxy_error != PERROR_NONE)) {
 		head->session_id = 0;
 	}
 	else {
 		head->session_id = sessionID;
 	}
 	head->capi_error = 0x0000; //return_type;
-	head->proxy_error = PERROR_AUTH_TYPE_NOT_SUPPORTED;
 
 	// Step 4: compose return body
 	body = (struct ANSWER_PROXY_AUTH*) (out_packet + sizeof(struct ANSWER_HEADER));
-	body->auth_type=0;
-	body->auth_len=0;
+	request->data_len=0;
 
 	numbytes = send( sock, out_packet, head->message_len, 0);
 	return numbytes;

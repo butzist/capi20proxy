@@ -34,7 +34,7 @@ int exec_capi_release(void *in_packet) {
 
 	if(return_type==0x0000)
 	{
-		del_app(request->app_id,&registered_apps);
+		del_app(request->app_id,registered_apps);
 	}
 
 	// Step 3: compose return header

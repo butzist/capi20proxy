@@ -16,6 +16,9 @@
 
 /* The CVS log:
  * $Log$
+ * Revision 1.3  2002/10/30 14:58:27  butzist
+ * fixed design error
+ *
  * Revision 1.8  2002/10/23 16:27:06  butzist
  * tried to implement auth
  *
@@ -100,7 +103,7 @@
 #define TYPE_PROXY_FEATURE		95
 
 
-const char *revision="$Revision$";
+#define revision "$Revision$"
 
 struct __version_t {
  unsigned long major;  // major version for incompatible versions
