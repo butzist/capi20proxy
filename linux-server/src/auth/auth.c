@@ -20,10 +20,31 @@
 
 #include "../capifwd.h"
 
+struct AUTH_USERPASS_DATA {
+	unsigned uname_len;
+	unsigned passwd_len;
+}
 
-/**
 
-ToDo: Create Authentication code here.
- Don'y forget to talk to the CLIENT people ..... nice idea, hum?
-
+/* 
+ * This function should return -1 for an authentication failure and any other value 
+ * for success 
  */
+int up_auth(char* indata) 
+{
+	struct AUTH_USERPASS_DATA *info;
+	char *uname;
+	char *passwd;
+	
+	info = (struct AUTH_USERPASS_DATA*) indata;
+	
+	uname = (char*) malloc( info->uname_len * sizeof(char));
+	passwd = (char*) malloc( info->passwd_len * sizeof(char));
+
+	memcpy ( uname, indata + sizeof(struct AUTH_USERPASS_DATA), info->uname_len );
+	memcpy ( passwd, indata + sizeof(struct AUTH_USERPASS_DATA) + info->uname_len, info->passwd_len );
+
+	// Now check username and password ...
+	
+	return 0;
+}

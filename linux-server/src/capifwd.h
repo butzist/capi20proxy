@@ -164,3 +164,5 @@ int exec_proxy_shutdown(char* excuse);
 
 /* command-line evaluation: */
 int eval_cmdline(int argc, char* argv[]);
+
+int up_auth(char *indata);

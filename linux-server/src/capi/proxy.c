@@ -65,9 +65,20 @@ int exec_proxy_helo(void *in_packet) {
 
 int exec_proxy_auth(void *in_packet) {
 	struct REQUEST_HEADER *request;     // the request header
+	struct REQUEST_PROXY_AUTH *lenp;
 	struct ANSWER_PROXY_AUTH *body;
 	struct ANSWER_HEADER *head;
-
+	char *authdata;
+	int noverfy;
+	
+	lenp = (struct REQUEST_PROXY_AUTH*) (in_packet+sizeof(struct REQUEST_HEADER));
+	if ( lenp->auth_len != 0 ) {
+		authdata = (char*) malloc( lenp.auth_len * sizeof(char));
+		memcpy (authdata, (char) (in_packet + sizeof(struct REQUEST_HEADER) + sizeof( struct REQUEST_PROXY_AUTH)), lenp->auth_len );
+		noverfy = up_auth(authdata);
+	}
+ 
+	
 	// Step 3: compose return header
 	request = (struct REQUEST_HEADER *) in_packet;
 	head = (struct ANSWER_HEADER*) out_packet;
@@ -78,7 +89,12 @@ int exec_proxy_auth(void *in_packet) {
 	head->message_id = request->message_id;
 	head->message_type = TYPE_PROXY_AUTH;
 	head->app_id = 0;
-	head->session_id = sessionID;
+	if ( noverfy == -1 ) {
+		head->session_id = 0;
+	}
+	else {
+		head->session_id = sessionID;
+	}
 	head->capi_error = 0x0000; //return_type;
 	head->proxy_error = PERROR_AUTH_TYPE_NOT_SUPPORTED;
 

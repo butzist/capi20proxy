@@ -41,13 +41,11 @@ int main ( int argc, char* argv[] ) {
 	port = 6674;
 	
 	eval_cmdline(argc, argv);
-
-	
 	become_daemon();
 
 	if ( ( sc = socket ( AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-   	syslog ( LOG_WARNING, sys_errlist[errno] );
-   	exit ( 1 );
+   		syslog ( LOG_WARNING, sys_errlist[errno] );
+   		exit ( 1 );
   	}
 
   	local_addr.sin_family = AF_INET;
@@ -70,7 +68,7 @@ int main ( int argc, char* argv[] ) {
   	strcpy ( argv[0], "capifwd_wait");
   
   	remote_size = sizeof (struct sockaddr_in);
-  	sessionID = 0;
+  	sessionID = 2;
   	while ( 1 ) {
 		sock = accept ( sc, (struct sockaddr*)&remote_addr, &remote_size );
 
@@ -83,28 +81,22 @@ int main ( int argc, char* argv[] ) {
 
 		switch(fork())
 		{
-		case 0: break;
-		case -1:
-			syslog (LOG_WARNING, "Exiting due to fork error");
-			close ( sc );
-			close ( sock );
-			exit ( 1 );
-		default: continue;
+			case 0: break;
+			case -1:
+				syslog (LOG_WARNING, "Exiting due to fork error");
+				close ( sc );
+				close ( sock );
+				exit ( 1 );
+			default: continue;
 		}
 		
-		/* not in this version (pre 0.7): 
-		
-		if ( validate_ip(inet_ntoa(remote_addr.sin_addr)) == F_REJECT ) {
-			syslog(LOG_WARNING, "Aborted client connection: rejected host or network.");
-			exit ( 0 );
-		}	
-
-		*/
 
 		sprintf(msg, "capifwd_handle (%s)", inet_ntoa(remote_addr.sin_addr));
 		strcpy ( argv[0], msg);
 		sprintf(msg, "Client from %s: spawned new handler %d.", inet_ntoa(remote_addr.sin_addr),getpid());
 		syslog ( LOG_NOTICE, msg );
+
+		
 		//init = time (NULL);
 
 
