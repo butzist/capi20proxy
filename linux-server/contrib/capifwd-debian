@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# This is a /etc/init.d-script for capifwd. 
+# Designed for Debian, it should do its work under  
+# RedHat, SuSE and *, too. 
+#
+# I am not a BASHer, I know.
+#
+
+PATH=/usr/bin:/usr/sbin:/sbin:/bin
+DAEMON=/usr/sbin/capifwd
+NAME="capifwd"
+ARGUMENTS=" "
+DESC="CAPI signal forwarding."
+
+test -f $DAEMON || exit 0
+set -e
+case "$1" in
+	start)
+		echo -n "Starting $DESC: "
+		touch /tmp/capifwd
+		capifwd 
+		echo "$NAME."
+		;;
+
+	stop)
+		echo -n "Stopping $DESC: "
+		killall -KILL capifwd 
+		rm -f /tmp/capiwd
+		echo "$NAME."
+		;;
+
+	restart)
+		echo -n "Restarting $DESC: "
+		killall -KILL capifwd
+		rm -f /tmp/capifwd
+		sleep 2
+		capifwd >/tmp/capifwd
+		echo "$NAME."
+		;;
+
+	*)
+		N=/etc/init.d/$NAME
+		echo "Usage: $N {start|stop|restart}" >&2
+		exit 1
+		;;
+
+
+esac
+exit 0
