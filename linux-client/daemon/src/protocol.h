@@ -1,7 +1,7 @@
 /*
 
   CAPI 2.0 Proxy
-  Protocol Definition Release 2 Prototype 4
+  Protocol Definition Release 2 Prototype 4.1
 
   7th March 2002. Written in Rannoch School
   8th March 2002. Reviewed in Baden-Baden :-)
@@ -16,14 +16,11 @@
 
 /* The CVS log:
  * $Log$
- * Revision 1.2  2002/08/19 23:59:58  frlind
+ * Revision 1.8  2002/10/23 16:27:06  butzist
+ * tried to implement auth
  *
- *
- * various updates in source files .
- *
- * Revision 1.2  2002/04/10 12:09:13  butzist
- * looked through the code, now waiting for Fritzle to find the syntax errors and compile it
- * it could work now but many features are missing
+ * Revision 1.7  2002/05/12 07:06:10  butzist
+ * updated
  *
  * Revision 1.6  2002/03/29 07:52:06  butzist
  * seems to work (got problems with DATA_B3)
@@ -43,7 +40,7 @@
  -------------------------------------------------------------------
  char   		| integer 	| 1 octet 	| yes  	| -
  int    		| integer 	| 2 " 	| yes  	| iA-32 standard
- unsigned  	| integer 	| 2 " 	| no  	|   "
+ unsigned  	| integer 	| 4 " 	| no  	|   "
  unsigned long | integer 	| 4 " 	| no  	|   "
 */
 
@@ -83,8 +80,6 @@
 #define AUTH_NO_AUTH	0x0000
 #define AUTH_BY_IP		0x0001	// auth
 #define	AUTH_USERPASS	0x0002
-#define	AUTH_RSA		0x0100	// encryption for get/put message
-#define	AUTH_BLOWFISH	0x0200
 
 /// define types:
 
@@ -102,9 +97,10 @@
 #define TYPE_PROXY_AUTH			98
 #define TYPE_PROXY_KEEPALIVE	97
 #define TYPE_PROXY_SHUTDOWN		96
+#define TYPE_PROXY_FEATURE		95
 
 
-//const char *revision="$Revision$";
+const char *revision="$Revision$";
 
 struct __version_t {
  unsigned long major;  // major version for incompatible versions
@@ -120,7 +116,7 @@ struct REQUEST_PROXY_HELO {  // type number: 99
 };
 
 struct REQUEST_PROXY_AUTH {  // type number: 98
- unsigned auth_len;
+ unsigned long auth_type;   // authentication type desired
 };
 
 struct REQUEST_PROXY_KEEPALIVE {  // type number: 97
@@ -177,8 +173,6 @@ struct ANSWER_PROXY_HELO {  // type number: 99
 };
 
 struct ANSWER_PROXY_AUTH {  // type number: 98
- unsigned long auth_type;   // authentication type desired
- unsigned auth_len;   // length of authentication data
 };
 
 struct ANSWER_PROXY_KEEPALIVE { // type number: 97
@@ -256,4 +250,3 @@ struct ANSWER_HEADER {
  unsigned long capi_error;
 };
 #endif
-

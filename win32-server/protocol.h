@@ -1,7 +1,7 @@
 /*
 
   CAPI 2.0 Proxy
-  Protocol Definition Release 2 Prototype 4
+  Protocol Definition Release 2 Prototype 4.1
 
   7th March 2002. Written in Rannoch School
   8th March 2002. Reviewed in Baden-Baden :-)
@@ -16,6 +16,9 @@
 
 /* The CVS log:
  * $Log$
+ * Revision 1.8  2002/10/23 16:27:06  butzist
+ * tried to implement auth
+ *
  * Revision 1.7  2002/05/12 07:06:10  butzist
  * updated
  *
@@ -37,7 +40,7 @@
  -------------------------------------------------------------------
  char   		| integer 	| 1 octet 	| yes  	| -
  int    		| integer 	| 2 " 	| yes  	| iA-32 standard
- unsigned  	| integer 	| 2 " 	| no  	|   "
+ unsigned  	| integer 	| 4 " 	| no  	|   "
  unsigned long | integer 	| 4 " 	| no  	|   "
 */
 
@@ -114,7 +117,6 @@ struct REQUEST_PROXY_HELO {  // type number: 99
 
 struct REQUEST_PROXY_AUTH {  // type number: 98
  unsigned long auth_type;   // authentication type desired
- unsigned auth_len;
 };
 
 struct REQUEST_PROXY_KEEPALIVE {  // type number: 97
@@ -171,7 +173,6 @@ struct ANSWER_PROXY_HELO {  // type number: 99
 };
 
 struct ANSWER_PROXY_AUTH {  // type number: 98
- unsigned auth_len;   // length of authentication data
 };
 
 struct ANSWER_PROXY_KEEPALIVE { // type number: 97
