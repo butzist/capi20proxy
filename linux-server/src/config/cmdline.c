@@ -31,7 +31,11 @@ int eval_cmdline( int argc, char* argv[] ) {
 	}
 
 	for ( i = 1; i < argc; i++) {
-			
+		if ( !strcmp("-d",argv[i]) || !strcmp("--debug", argv[i]) )
+		{
+			i++;
+			debug = 1;
+		}
 		if ( !strcmp("-f",argv[i]) || !strcmp("--file", argv[i]) )
 		{
 			i++;

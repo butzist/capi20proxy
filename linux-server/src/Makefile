@@ -11,33 +11,33 @@
 all:
 
 #core code:
-	gcc -c capifwd.c -Wall -O3
-	gcc -c unix.c -Wall -O3
-	gcc -c appindex.c -Wall -O3
+	gcc -c capifwd.c $(CFLAGS)
+	gcc -c unix.c $(CFLAGS)
+	gcc -c appindex.c $(CFLAGS)
 
 #auth code:
-	gcc -c auth/auth.c -Wall -O3
+	gcc -c auth/auth.c $(CFLAGS)
 	
 #config code: 
-	gcc -c config/cmdline.c -Wall -O3
+	gcc -c config/cmdline.c $(CFLAGS)
 	
 #capi commands:
-	gcc -c capi/etc.c -Wall -O3
-	gcc -c capi/isinstalled.c -Wall -O3
-	gcc -c capi/profile.c -Wall -O3
-	gcc -c capi/getmessage.c -Wall -O3
-	gcc -c capi/putmessage.c -Wall -O3
-	gcc -c capi/manufacturer.c -Wall -O3
-	gcc -c capi/waitforsignal.c -Wall -O3
-	gcc -c capi/version.c -Wall -O3
-	gcc -c capi/serial.c -Wall -O3
-	gcc -c capi/register.c -Wall -O3
-	gcc -c capi/release.c -Wall -O3 
-	gcc -c capi/proxy.c -Wall -O3
+	gcc -c capi/etc.c $(CFLAGS)
+	gcc -c capi/isinstalled.c $(CFLAGS)
+	gcc -c capi/profile.c $(CFLAGS)
+	gcc -c capi/getmessage.c $(CFLAGS)
+	gcc -c capi/putmessage.c $(CFLAGS)
+	gcc -c capi/manufacturer.c $(CFLAGS)
+	gcc -c capi/waitforsignal.c $(CFLAGS)
+	gcc -c capi/version.c $(CFLAGS)
+	gcc -c capi/serial.c $(CFLAGS)
+	gcc -c capi/register.c $(CFLAGS)
+	gcc -c capi/release.c $(CFLAGS) 
+	gcc -c capi/proxy.c $(CFLAGS)
 
 #finished object code generation...
 #link:
-	gcc -o capifwd *.o -Wall -lcapi20 -O3 
+	gcc -o capifwd *.o -lcapi20 $(CFLAGS)
 
 install: 
 
@@ -47,7 +47,7 @@ install:
 	chmod 774 /etc/init.d/capifwd 
 
 clean:
-	rm -rf *.o
+	rm -f *.o capifwd
 	 
 
 

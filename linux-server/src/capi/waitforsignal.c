@@ -73,8 +73,7 @@ int exec_capi_waitforsignal(void *in_packet) {
 
 	numbytes=send( sock, out_packet, head->message_len, 0);
 	
-	if(pid==0)
-	{
+	if(pid==0) {
 		exit(0);
 	} else {
 		return numbytes;

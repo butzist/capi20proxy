@@ -62,6 +62,7 @@ int timeout;
 int sc;
 int sock;
 int numbytes;
+int debug;
 
 unsigned long sessionID;
 unsigned long auth_types;
