@@ -2,9 +2,6 @@
  * Copyright (C) 2002: Friedrich Lindenberg, Adam Szalkowski.
  * Contact: capi20proxy-public@lists.sourceforge.net
  * See ../COPYRIGHT for Licensing and Copyright.
- *
- * $Log$
- *
  */
 
 #include "capifwd.h"
