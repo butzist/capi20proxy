@@ -1,31 +1,14 @@
-//////////////////////////////////////////////////////////////////////////////
-// CAPI 2.0 Proxy Project:
-//   capifwd server for linux.
-// Copyright(C) 2002: F. Lindenberg, A. Szalkowski, B. Gerald.
-//
-// This program is free software following the terms of the GNU GPL.
-// please refer to http://www.gnu.org/licenses/gpl.html .
-//
-// Support can be obtained from the capi20proxy-public@lists.sourceforge.net
-// mailing lists.
-//
-// For this module, also contact: frlind@frlind.de. Please put capi20proxy
-// somewhere in your Subject:-Line.
-//////////////////////////////////////////////////////////////////////////////
-//
-// This is the main source file that contains whatever didn't fit anywhere
-// else.
-// main() belongs to this category.
-//
-//////////////////////////////////////////////////////////////////////////////
-
+/* The Capi 2.0 Proxy Linux Server.
+ * Copyright (C) 2002: Friedrich Lindenberg, Adam Szalkowski.
+ * Contact: capi20proxy-public@lists.sourceforge.net
+ * See ../COPYRIGHT for Licensing and Copyright.
+ *
+ * $Log$
+ *
+ */
 
 #include "capifwd.h"
 
-
-////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////////// MAIN //////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main ( int argc, char* argv[] ) {
 	struct REQUEST_HEADER *request;     // the request header
