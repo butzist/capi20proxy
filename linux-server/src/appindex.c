@@ -97,3 +97,6 @@ void release_all(struct appl_list** _list)
 		capi20_release(app);
 	}
 }
+
+
+

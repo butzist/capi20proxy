@@ -30,7 +30,7 @@ case "$1" in
 		echo "$NAME."
 		;;
 
-	restart|force-reload)
+	restart)
 		echo -n "Restarting $DESC: "
 		killall -KILL capifwd
 		rm -f /tmp/capifwd
@@ -41,7 +41,7 @@ case "$1" in
 
 	*)
 		N=/etc/init.d/$NAME
-		echo "Usage: $N {start|stop|restart|force-reload}" >&2
+		echo "Usage: $N {start|stop|restart}" >&2
 		exit 1
 		;;
 

@@ -41,7 +41,7 @@
 
 #include "protocol.h"
 
-#include "config/config.h"
+//#include "config/config.h"
 //#include "auth/ipfilter.h"
 
 
@@ -160,3 +160,7 @@ int exec_proxy_auth(void *in_packet);
 int exec_proxy_helo(void *in_packet);
 int exec_proxy_shutdown(char* excuse);
 //////////////////////////////////////////////////
+
+
+/* command-line evaluation: */
+int eval_cmdline(int argc, char* argv[]);
