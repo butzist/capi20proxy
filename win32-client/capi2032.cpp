@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.11  2002/04/11 09:02:07  butzist
+ * found a bug (timeout)
+ *
  * Revision 1.10  2002/04/09 14:32:00  butzist
  * works now quite fine
  * added timeout when receiving answer form server
@@ -61,7 +64,7 @@
 #define VERSION_MINOR	2
 
 #define ILLEGAL_ANSWER		((char*)(void*)-1)
-#define _WAITFORMESSAGE_TIMEOUT		5000
+#define _WAITFORMESSAGE_TIMEOUT		-1
 IN_ADDR toaddr;
 
 int status=0;
@@ -580,11 +583,11 @@ DWORD sendAndReceive(UINT msgId, char* request, char** answer)
 		return SOCKET_ERROR;
 	}
 	
-	UINT timeout=0;
+	UINT timeout=_WAITFORMESSAGE_TIMEOUT;
 
 	while(*answer==NULL)
 	{
-		if(++timeout>_WAITFORMESSAGE_TIMEOUT)
+		if((timeout==-1) || (--timeout)) // if timeout occurs
 		{
 			*answer=ILLEGAL_ANSWER;
 			removeFromHash(msgId);
