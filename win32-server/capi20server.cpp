@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.5  2002/03/03 20:38:19  butzist
+ * added Log history
+ *
  */
 
 /*
@@ -29,13 +32,18 @@
 #include "capi20server.h"
 #include "protocol.h"
 
+#define __PORT	6674	// Fritzle's Telefonnummer
+#define _MAX_SESSIONS	127
+#define _MSG_SIZE		10000
+
+const char* LOGFILE="c:\\winnt\\capi20proxy.log";
 
 SERVICE_STATUS          ServiceStatus; 
 SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
 int run,pause,debug,recv_threads; 
 FILE *f;
-SOCKET socke;
 HANDLE RunningThread;
+DWORD session=0;
 
 HANDLE Router;
 
@@ -58,7 +66,6 @@ int main(int argc, char* argv[])
 { 
 	RunningThread=0;
 	debug=0;
-	recv_threads=0;
 
 	for(int i=1;i<argc;i++) {
 		if(strcmp(argv[i],"-debug")==0){
@@ -68,7 +75,7 @@ int main(int argc, char* argv[])
 	}
 	
 	// open file for debug output
-	if(debug==0) f=fopen("c:\\winnt\\capi20proxy.log","a+t");
+	if(debug==0) f=fopen(LOGFILE,"a+t");
 
 	for(i=1;i<argc;i++) {
 		if(strcmp(argv[i],"-i")==0){
@@ -87,7 +94,7 @@ int main(int argc, char* argv[])
 			SC_HANDLE schService = CreateService( 
 				schSCManager,              // SCManager database 
 				"capi20server",            // name of service 
-				"Remote CAPI 2.0 Server",  // service name to display 
+				"CAPI 2.0 Proxy Server",  // service name to display 
 				SERVICE_ALL_ACCESS,        // desired access 
 				SERVICE_WIN32_OWN_PROCESS, // service type 
 				SERVICE_AUTO_START,        // start type 
@@ -276,11 +283,24 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 			if(test.fd_count!=0){
 				DWORD thid;
 				HANDLE threadhandle;
-				if((threadhandle=CreateThread(NULL,0,ReceiveRequest,NULL,0,&thid))==NULL){
+				SOCKET connection=accept(socke,NULL,0);
+				if(connection==INVALID_SOCKET)
+				{
+					DebugOut("ServiceMain(): accept",FALSE);
+					continue;
+				}
+
+				DWORD sess=allocSession(socke);
+				if(sess==0)
+				{
+					DebugOut("ServiceMain(): no free session Ids",FALSE);
+					continue;
+				}
+
+				if((threadhandle=CreateThread(NULL,0,StartSession,(LPVOID)sess,0,&thid))==NULL){
 					DebugOut("ServiceMain(): CreateThread");
 				} else {
 					CloseHandle(threadhandle);
-					recv_threads++;
 				}
 			}
 		}
@@ -290,336 +310,143 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 	DebugOut("Exiting ServiceMain()",FALSE);
    return; 
 } 
- 
-DWORD WINAPI ReceiveRequest(LPVOID param){
-	if(debug) DebugOut("ReceiverRequest(): Receiving Request",FALSE);
-	fd_set test;
-	test.fd_count=1;
-	test.fd_array[0]=socke;
-	if(select(0,&test,NULL,NULL,NULL)==SOCKET_ERROR){
-		DebugOut("ReceiveRequest(): select",FALSE);
-		recv_threads--;
-		return 1;
-	} else {
-		if(test.fd_count==0){
-			recv_threads--;
-			return 1;
+
+DWORD WINAPI StartSession(LPVOID param)
+{
+	char* request=NULL;
+	sess=(DWORD)param;
+	DWORD err=1;
+	char* request;
+	SOCKET socke=sockets[sess];
+	LPVOID auth_data;
+	UINT auth_type;
+	UINT auth_len;
+	char name[64];
+
+	do {
+		if(pause!=1)
+		{
+			request=malloc(_MSG_SIZE);
+			if(request==NULL)
+			{
+				DebugOut("StartSession(): malloc");
+				break;	// or perhaps just continue
+			}
+
+			err=recv(socke,request,_MSG_SIZE,0);	// blocking call
+			if(err==0 || err==SOCKET_ERROR)
+			{
+				free((void*)request);
+				break;
+			}
+
+			verifyRequest(request);		// verify sizes
+			verifySessionId(request,session+sess);	// verify session_id
+
+			if(debug) DebugOut("ReceiverRequest(): Received Request",FALSE);
+
+			REQUEST_HEADER *header=(REQUEST_HEADER*)request;
+			LPVOID body=(LPVOID)(request+header->header_len);
+			char* data=request+header->header_len+header->body_len;
+
+			switch(rheader->message_type)
+			{
+			case TYPE_CAPI_REGISTER:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_REGISTER",FALSE);
+				exec_capi_register(socke,header,(REQUEST_CAPI_REGISTER*)body,data);
+				break;
+
+			case TYPE_CAPI_RELEASE:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_RELEASE",FALSE);
+				exec_capi_release(socke,header,(REQUEST_CAPI_RELEASE*)body,data);
+				break;
+
+			case TYPE_CAPI_PUTMESSAGE:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PUTMESSAGE",FALSE);
+				exec_capi_putmessage(socke,header,(REQUEST_CAPI_PUTMESSAGE*)body,data);
+				break;
+
+			case TYPE_CAPI_GETMESSAGE:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_GETMESSAGE",FALSE);
+				exec_capi_getmessage(socke,header,(REQUEST_CAPI_GETMESSAGE*)body,data);
+				break;
+
+			case TYPE_CAPI_WAITFORSIGNAL:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_WAITFORSIGNAL",FALSE);
+				exec_capi_waitforsignal(socke,header,(REQUEST_CAPI_WAITFORSIGNAL*)body,data);
+				break;
+
+			case TYPE_CAPI_MANUFACTURER:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_MANUFACTURER",FALSE);
+				exec_capi_manufacturer(socke,header,(REQUEST_CAPI_MANUFACTURER*)body,data);
+				break;
+
+			case TYPE_CAPI_VERSION:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_VERSION",FALSE);
+				exec_capi_version(socke,header,(REQUEST_CAPI_VERSION*)body,data);
+				break;
+
+			case TYPE_CAPI_SERIAL:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_SERIAL",FALSE);
+				exec_capi_serial(socke,header,(REQUEST_CAPI_SERIAL*)body,data);
+				break;
+
+			case TYPE_CAPI_PROFILE:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_PROFILE",FALSE);
+				exec_capi_profile(socke,header,(REQUEST_CAPI_PROFILE*)body,data);
+				break;
+
+			case TYPE_CAPI_INSTALLED:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_INSTALLED",FALSE);
+				exec_capi_installed(socke,header,(REQUEST_CAPI_INSTALLED*)body,data);
+				break;
+
+			case TYPE_PROXY_HELO:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_HELO",FALSE);
+				exec_proxy_helo(socke,header,(REQUEST_PROXY_HELO*)body,data);
+				break;
+
+			case TYPE_PROXY_KEEPALIVE:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_KEEPALIVE",FALSE);
+				exec_proxy_keepaplive(socke,header,(REQUEST_PROXY_KEEPALIVE*)body,data);
+				break;
+
+			case TYPE_PROXY_AUTH:
+				if(debug) DebugOut("ReceiveRequest(): TYPE_PROXY_AUTH",FALSE);
+				exec_proxy_auth(socke,header,(REQUEST_PROXY_AUTH*)body,data);
+				break;
+
+			default:
+				DebugOut("ReceiveRequest(): Invalid Message Type",FALSE);
+			}
+			free((void*)request);
 		}
 	}
-	
-	SOCKADDR_IN from;
-	char buffer[512];
-	int len=sizeof(SOCKADDR_IN);
 
-	if(recvfrom(socke,buffer,512,0,(SOCKADDR*)&from,&len)==SOCKET_ERROR){
-		DWORD err=WSAGetLastError();
-		SetLastError(err);
-		DebugOut("ReceiveRequest(): recvfrom");
-		recv_threads--;
-		return err;
-	}
-	if(debug) DebugOut("ReceiveRequest(): Request received",FALSE);
-
-	REQUEST *request=(REQUEST*) buffer;
-	ANSWER answer;
-		
-	answer.type=request->type;
-
-	char *buffer1=NULL,*buffer2=NULL;
-	SOCKET connection;
-	UINT len1=0,len2=0;
-	DWORD dword,err;
-
-	unsigned char cmd1,cmd2;
-
-	err=0;
-
-	switch(request->type)
+	if(err==0)
 	{
-	case TYPE_REGISTER:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_REGISTER",FALSE);
-		answer.data.ad_register.ret=CAPI_REGISTER(
-			request->data.rd_register.MessageBufferSize,
-			request->data.rd_register.maxLogicalConnection,
-			request->data.rd_register.maxBDataBlocks,
-			request->data.rd_register.maxBDataLen,
-			&(answer.data.ad_register.ApplID));
-		err=0;
-		break;
-
-	case TYPE_RELEASE:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_RELEASE",FALSE);
-		answer.data.ad_release.ret=CAPI_RELEASE(request->data.rd_release.ApplID);
-		err=0;
-		break;
-
-	case TYPE_PUT_MESSAGE:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_PUT_MESSAGE",FALSE);
-		connection=CreateSocket(SOCK_STREAM,IPPROTO_TCP,0);
-		if(socke==INVALID_SOCKET){
-			err=GetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: CreateSocket");
-			break;
-		}
-		
-		err=connect(connection,(SOCKADDR*) &(request->data.rd_put_message.me),sizeof(SOCKADDR_IN));
-		if(err==SOCKET_ERROR){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: connect");
-			answer.data.ad_put_message.ret=0x1108;
-			closesocket(connection);
-			break;
-		}
-		
-		err=recv(connection,(char*)&len1,2,0);
-		if((err==SOCKET_ERROR) || (err<2)){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: recv");
-			answer.data.ad_put_message.ret=0x1108;
-			closesocket(connection);
-			break;
-		}
-		
-		buffer1=(char*)GlobalAlloc(GPTR,len1);
-		if(buffer1==NULL){
-			err=GetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: GlobalAlloc");
-			answer.data.ad_put_message.ret=0x1108;
-			closesocket(connection);
-			break;
-		}
-
-		memcpy(buffer1,&len1,2);
-		err=recv(connection,buffer1+2,len1-2,0);
-		if((err==SOCKET_ERROR) || (err==0) || (err<len1-2)){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: recv");
-			answer.data.ad_put_message.ret=0x1108;
-			closesocket(connection);
-			break;
-		}
-
-		cmd1=buffer1[4];
-		cmd2=buffer1[5];
-		
-		if((cmd1==0x86) && (cmd2==0x80)){
-			if(len1<18){
-				DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE2: Buffer too small",FALSE);
-				answer.data.ad_put_message.ret=0x1108;
-				break;
-			}
-			
-			memcpy(&len2,buffer1+16,2);
-			buffer2=(char*)GlobalAlloc(GPTR,len2);
-			if(buffer2==NULL){
-				err=GetLastError();
-				SetLastError(err);
-				DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE2: GlobalAlloc");
-				answer.data.ad_put_message.ret=0x1108;
-				closesocket(connection);
-				break;
-			}
-
-			err=recv(connection,buffer2,len2,0);
-			if((err==SOCKET_ERROR) || (err==0) || (err<len2)){
-				err=WSAGetLastError();
-				SetLastError(err);
-				DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE2: recv");
-				answer.data.ad_put_message.ret=0x1108;
-				closesocket(connection);
-				break;
-			}
-
-			dword=(DWORD)buffer2;
-			memcpy(buffer1+12,&dword,4);
-		}
-
-		err=closesocket(connection);
-		if(err==SOCKET_ERROR){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_PUT_MESSAGE: closesocket");
-			answer.data.ad_put_message.ret=0x1108;
-			break;
-		}
-
-		answer.data.ad_put_message.ret=CAPI_PUT_MESSAGE(request->data.rd_put_message.ApplID,buffer1);
-		GlobalFree((LPVOID)buffer1);
-		if(buffer2!=NULL) GlobalFree((LPVOID)buffer2);
-		err=0;
-		break;
-
-	case TYPE_GET_MESSAGE:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_GET_MESSAGE",FALSE);
-		connection=CreateSocket(SOCK_STREAM,IPPROTO_TCP,0);
-		if(socke==INVALID_SOCKET){
-			err=GetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE: CreateSocket");
-			answer.data.ad_get_message.ret=0x1108;
-			break;
-		}
-		
-		err=connect(connection,(SOCKADDR*) &(request->data.rd_get_message.me),sizeof(SOCKADDR_IN));
-		if(err==SOCKET_ERROR){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE: connect");
-			answer.data.ad_get_message.ret=0x1108;
-			closesocket(connection);
-			break;
-		}
-		
-		answer.data.ad_get_message.ret=CAPI_GET_MESSAGE(
-			request->data.rd_get_message.ApplID,
-			(void**)&buffer1);
-
-		if((answer.data.ad_get_message.ret & 0x1100)==NO_ERROR){
-			memcpy(&len1,buffer1,2);
-			
-			err=send(connection,buffer1,2,0);
-			if((err==SOCKET_ERROR) || (err==0)){
-				err=WSAGetLastError();
-				SetLastError(err);
-				DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE: send");
-				answer.data.ad_get_message.ret=0x1108;
-				closesocket(connection);
-				break;
-			}
-			
-			err=send(connection,buffer1+2,len1-2,0);
-			if((err==SOCKET_ERROR) || (err==0)){
-				err=WSAGetLastError();
-				SetLastError(err);
-				DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE: send");
-				answer.data.ad_get_message.ret=0x1108;
-				closesocket(connection);
-				break;
-			}
-
-			cmd1=buffer1[4];
-			cmd2=buffer1[5];
-			
-			if((cmd1==0x86) && (cmd2==0x82)){
-				
-				memcpy(&len2,buffer1+16,2);
-				DWORD pointer;
-				memcpy(&pointer,buffer1+12,4);
-				buffer2=(char*)(LPVOID)pointer;
-				if(buffer2==NULL){
-					DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE2: NULL-Pointer in message detected",FALSE);
-					answer.data.ad_get_message.ret=0x1108;
-					closesocket(connection);
-					break;
-				}
-
-				err=send(connection,buffer2,len2,0);
-				if((err==SOCKET_ERROR) || (err==0)){
-					err=WSAGetLastError();
-					SetLastError(err);
-					DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE2: send");
-					answer.data.ad_get_message.ret=0x1108;
-					closesocket(connection);
-					break;
-				}
-			}
-		}
-		
-		err=closesocket(connection);
-		if(err==SOCKET_ERROR){
-			err=WSAGetLastError();
-			SetLastError(err);
-			DebugOut("ReceiveRequest()/TYPE_GET_MESSAGE2: closesocket");
-			answer.data.ad_get_message.ret=0x1108;
-			break;
-		}
-
-		err=0;
-		break;
-
-	case TYPE_WAIT_FOR_SIGNAL:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_WAIT_FOR_SIGNAL",FALSE);
-		answer.data.ad_wait_for_signal.ret=CAPI_WAIT_FOR_SIGNAL(request->data.rd_wait_for_signal.ApplID);
-		err=0;
-		break;
-
-	case TYPE_GET_MANUFACTURER:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_GET_MANUFACTURER",FALSE);
-		answer.data.ad_get_manufacturer.ret=CAPI_GET_MANUFACTURER(answer.data.ad_get_manufacturer.szBuffer);
-		err=0;
-		break;
-
-	case TYPE_GET_VERSION:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_GET_VERSION",FALSE);
-		answer.data.ad_get_version.ret=CAPI_GET_VERSION(
-			&(answer.data.ad_get_version.CAPIMajor),
-			&(answer.data.ad_get_version.CAPIMinor),
-			&(answer.data.ad_get_version.ManufacturerMajor),
-			&(answer.data.ad_get_version.MAnufacturerMinor));
-		err=0;
-		break;
-
-	case TYPE_GET_SERIAL_NUMBER:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_GET_SERIAL_NUMBER",FALSE);
-		answer.data.ad_get_serial_number.ret=CAPI_GET_SERIAL_NUMBER(answer.data.ad_get_serial_number.szBuffer);
-		err=0;
-		break;
-
-	case TYPE_GET_PROFILE:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_GET_PROFILE",FALSE);
-		answer.data.ad_get_profile.ret=CAPI_GET_PROFILE(
-			answer.data.ad_get_profile.szBuffer,
-			request->data.rd_get_profile.CtrlNr);
-		err=0;
-		break;
-
-	case TYPE_INSTALLED:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_CAPI_INSTALLED",FALSE);
-		answer.data.ad_installed.ret=CAPI_INSTALLED();
-		err=0;
-		break;
-
-	case TYPE_WHO_AM_I:
-		if(debug) DebugOut("ReceiveRequest(): TYPE_WHO_AM_I",FALSE);
-		answer.data.ad_who_am_i.you=from;
-		err=0;
-		break;
-
-	default:
-		DebugOut("ReceiveRequest(): Invalid Message Type",FALSE);
-		err=1;
-		recv_threads--;
-		return 1;
+		send_answer_proxy_shutdown(socke,session+sess,"Connection shutting down");
+	} else {
+		send_answer_proxy_shutdown(socke,session+sess,"Socket Error");
 	}
 
-	if((sendto(socke,(LPCTSTR)&answer,sizeof(answer),0,(SOCKADDR*)&from,sizeof(SOCKADDR_IN)))
-		==SOCKET_ERROR){
-		DWORD err=WSAGetLastError();
-		SetLastError(err);
-		DebugOut("ReceiveRequest(): sendto");
-		recv_threads--;
-		return err;
-	}
-
-	recv_threads--;
-	return NO_ERROR;
-}
-
+	closesocket(socke);
+	freeSession(sess);
+}	
+ 
 // Stub initialization function. 
 DWORD ServiceInitialization(DWORD argc, LPTSTR *argv,DWORD *specificError) 
 {
-	socke=CreateSocket(SOCK_DGRAM,IPPROTO_UDP,7103);
+	session+=0x10000;
+	socke=CreateSocket(SOCK_STREAM,IPPROTO_TCP,__PORT);
 	if(socke==INVALID_SOCKET){
 		DWORD err=GetLastError();
 		SetLastError(err);
 		DebugOut("InitService(): CreateSocket");
 		return err;
 	}
+
+	listen(socke,10);
 
 	return NO_ERROR;
 } 
