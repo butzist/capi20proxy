@@ -18,6 +18,10 @@
 */
 
 /*
+ * $Log$
+ */
+
+/*
     Main source file for the module
 */
 
@@ -276,9 +280,9 @@ int capiproxy_ctl_read_proc(char *_buffer, char **_start, off_t _off,int _count,
 
 static ssize_t capiproxy_read(struct file *_f, char *_buffer, size_t _size, loff_t *_off)
 {
-	// I dont't know what to do with the *_off. So I didn't implement it...
+	int minor=MINOR(_f->f_dentry->d_inode->i_rdev);
+	int major=MAJOR(_f->f_dentry->d_inode->i_rdev);
 
-	int minor=(int)_f->private_data;
 
 	while((queue_empty(&(card[minor].msg_queue))) && (_f->f_flags & F_BLOCK)) {} //wait until message arrives if file opened in blocking mode
 
@@ -294,7 +298,15 @@ static ssize_t capiproxy_read(struct file *_f, char *_buffer, size_t _size, loff
 			len=_size;
 		}
 
-		memcpy(skb->data,buffer,len); //queue -> buffer
+		char* writepos = skb_put(skb);
+
+		copy_to_user(buffer, writepos, len); //queue -> buffer
+		{
+			printk("%s: Failed copying data to userspace", DRIVERNAME);
+			kfree_skb(skb);
+			return ERESTARTSYS;
+		}
+
 		kfree_skb(skb);
 	}
 
@@ -303,12 +315,19 @@ static ssize_t capiproxy_read(struct file *_f, char *_buffer, size_t _size, loff
 
 static ssize_t capiproxy_write(struct file *_f, const char *_buffer, size_t _size, loff_t *_off)
 {
-	// I dont't know what to do with the *_off. So I didn't implement it...
+	int minor=MINOR(_f->f_dentry->d_inode->i_rdev);
+	int major=MAJOR(_f->f_dentry->d_inode->i_rdev);
 
 	if(_size<4) return 0; //the first DWORD (unsigned long) should indicate the type of the message
 
-	__u32 type=READ_DWORD((byte*)_buffer);
-	int minor=(int)_f->private_data;
+	__u32 type;
+
+	if(!get_user(type,(__u32*)_buffer))
+	{
+		printk("%s: Failed getting value from userspace", DRIVERNAME);
+		return ERESTARTSYS;
+	}
+
 
 	// set the size and the pointer to the data to the "real" values
 	size_t size = _size - 4;
@@ -326,7 +345,12 @@ static ssize_t capiproxy_write(struct file *_f, const char *_buffer, size_t _siz
 			skb = alloc_skb(size), GFP_ATOMIC);
 			byte *writepos = (byte *) skb_put(skb, size);
 			
-			memcpy(writepos, buffer, size);
+			if(copy_from_user(writepos, buffer, size)!=0)
+			{
+				printk("%s: Failed getting data from userspace", DRIVERNAME);
+				return ERESTARTSYS;
+			}
+
 
 			if(CAPI_MESSAGE(skb->data)==CAPI_CONNECT_B3_IND)  //not too shure, whether this is the only possible message
 			{
@@ -340,7 +364,7 @@ static ssize_t capiproxy_write(struct file *_f, const char *_buffer, size_t _siz
 
 			card[minor].ctrl->handle_capi_msg(buffer,ApplId,skb,...);
 
-			kfree_skb(skb);         //have I to do this?
+			//kfree_skb(skb);         //have I to do this?
 		}
 		else
 		{
@@ -411,8 +435,6 @@ static int capiproxy_open(struct inode *_i, struct file *_f)
     
     printk("%s: open called with major(%i) and minor(%i)\n", DRIVERNAME, major, minor);
     
-    _f->private_data=(void *)minor;
-
 	// first set the name and revision in the struct
 	spin_lock(&kernelcapi_lock);
 
@@ -422,7 +444,7 @@ static int capiproxy_open(struct inode *_i, struct file *_f)
 		sprintf(capiproxy_driver.name, "capi20proxy%i",minor);
 		sprintf(capiproxy_driver.revision, "0");
 
-		card[minor].ctrl = di->attach_ctrl(capiproxy_driver, "capi20proxy", (void*)minor);	// we save the mapped controller id in the driverdata field
+		card[minor].ctrl = di->attach_ctrl(capiproxy_driver, DRIVERNAME, (void*)minor);	// we save the mapped controller id in the driverdata field
 
 		card[minor].msg_queue.length=MSG_QUEUE_LENGTH;
 	    queue_init(&(card[minor].msg_queue));
