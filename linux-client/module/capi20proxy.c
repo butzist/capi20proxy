@@ -83,20 +83,6 @@ static capi20proxy_card cards[CAPIPROXY_MAXCONTR];
 static spinlock_t kernelcapi_lock;
 static struct capi_driver_interface *di;
 
-/*
- * Wait queue for any call to rmmod while there
- * are tasks in the queue
- */
-#ifndef NOTASK
-wait_queue_head_t rmmod_queue;
-
-/*
- * This helps the above cause
- */
-
-static __u16 system_shutting_down = 0;
-#endif
-
 static char *main_revision	= "$Revision$";
 static char *capiproxy_version	= "0.6.1";
 static char *DRIVERNAME		= "capi20proxy";
@@ -573,10 +559,6 @@ static void handle_send_msg(void *dummy)
 			wake_up_interruptible(&card->wait_queue_out);
 	}
 
-	if (system_shutting_down) {
-		system_shutting_down = 0;
-		wake_up_interruptible(&rmmod_queue);
-	}
 }
 #endif
 
@@ -849,9 +831,6 @@ static int __init capiproxy_init(void)
 {
 	capiproxy_init_cards();
 
-#ifndef NOTASK
-	init_waitqueue_head(&rmmod_queue);
-#endif
 	register_chrdev(CAPIPROXY_MAJOR, DRIVERNAME, &capiproxy_fops);
 
 	spin_lock(&kernelcapi_lock);
@@ -889,9 +868,7 @@ static void __exit capiproxy_exit(void)
 	}
 
 #ifndef NOTASK
-	system_shutting_down = 1;
-	while(system_shutting_down)
-		interruptible_sleep_on(&rmmod_queue);
+	handle_send_msg(NULL);
 #endif
 	
 	unregister_chrdev(CAPIPROXY_MAJOR, DRIVERNAME);
