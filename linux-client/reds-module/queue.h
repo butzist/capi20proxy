@@ -18,6 +18,10 @@
 */
 
 /*
+ * $Log$
+ */
+
+ /*
     Header file for the message queue functions
 */
 

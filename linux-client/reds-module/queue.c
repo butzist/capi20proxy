@@ -18,6 +18,10 @@
 */
 
 /*
+ * $Log$
+ */
+
+/*
     Main source file for the message queue
 */
 
