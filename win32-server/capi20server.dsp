@@ -108,6 +108,10 @@ SOURCE=.\capi20server.h
 # End Source File
 # Begin Source File
 
+SOURCE=.\mytypes.h
+# End Source File
+# Begin Source File
+
 SOURCE=./protocol.h
 # End Source File
 # Begin Source File

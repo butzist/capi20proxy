@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.13  2002/05/12 07:06:10  butzist
+ * updated
+ *
  * Revision 1.12  2002/04/11 09:01:23  butzist
  * only some minor bugs
  *
@@ -57,22 +60,21 @@
 #include "capi20server.h"
 #include "protocol.h"
 #include "resource.h"
+#include "mytypes.h"
 
-#define __PORT	6674	// Fritzle's Telefonnummer :-)
-#define _MAX_SESSIONS	127
-#define _MSG_SIZE		10000
 #define _TIMEOUT		-1		// no timeout
 
 #define	_VERSION_MAJOR	1
-#define _VERSION_MINOR	2
+#define _VERSION_MINOR	3
 
 const __version_t	_SERVER_VERSION = { _VERSION_MAJOR, _VERSION_MINOR };
 const char* _SERVER_NAME = "CAPI 2.0 Proxy Win32 Server";
 
-const unsigned long _AUTH_TYPES = AUTH_NO_AUTH;
-const bool	_AUTH_REQUIRED = false;
+u32 AUTH_TYPES = AUTH_NO_AUTH; //AUTH_BY_IP | AUTH_USERPASS
+u32	AUTH_REQUIRED = false;
 
-const char* LOGFILE="c:\\winnt\\capi20proxy.log";
+char	LOGFILE[256]=__LOGFILE;
+DWORD	PORT=__PORT;
 
 SERVICE_STATUS          ServiceStatus; 
 SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
@@ -82,6 +84,7 @@ HANDLE RunningThread;
 DWORD session=0;
 SOCKET sockets[_MAX_SESSIONS];
 SOCKET socke;
+IN_ADDR localaddr = {INADDR_ANY};
 
 HANDLE Router;
 
@@ -218,6 +221,50 @@ int main(int argc, char* argv[])
 		DebugOut("main(): WSAStartup");
 		return 1;
 	}
+	
+	//Get some values from the registry
+	char ipstr[256];
+	DWORD err,len;
+	HKEY key;
+
+	err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\capi20proxy\\server",0,KEY_QUERY_VALUE,&key);
+	if(err!=ERROR_SUCCESS){
+		::MessageBox(NULL,"Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\capi20proxy\\server\"","Error",MB_OK);
+		return FALSE;
+	}
+	
+	len=256;
+	err=RegQueryValueEx(key,"logfile",NULL,NULL,(unsigned char*)LOGFILE,&len);
+	if(err!=ERROR_SUCCESS){
+		::MessageBox(NULL,"Could not read Regitry Value \"HKEY_LOCAL_MACHINE\\Software\\capi20proxy\\server\\logfile\"","Error",MB_OK);
+		return FALSE;
+	}
+
+	len=256;
+	err=RegQueryValueEx(key,"bind",NULL,NULL,(unsigned char*)ipstr,&len);
+	if(err==ERROR_SUCCESS){
+		localaddr.S_un.S_addr=inet_addr(ipstr);
+	}
+
+	len=4;
+	err=RegQueryValueEx(key,"port",NULL,NULL,(unsigned char*)&PORT,&len);
+	if(err!=ERROR_SUCCESS){
+		PORT=__PORT;
+	}
+
+	len=4;
+	err=RegQueryValueEx(key,"auth_required",NULL,NULL,(unsigned char*)&AUTH_REQUIRED,&len);
+	if(err!=ERROR_SUCCESS){
+		AUTH_REQUIRED=false;
+	}
+
+	len=4;
+	err=RegQueryValueEx(key,"auth_types",NULL,NULL,(unsigned char*)&AUTH_TYPES,&len);
+	if(err!=ERROR_SUCCESS){
+		AUTH_TYPES=AUTH_NO_AUTH;
+	}
+
+	RegCloseKey(key);
 
 	
 	// The Debug mode starts the server in a console (not as a service in 
@@ -461,69 +508,26 @@ void freeSession(int sess)
 	sockets[sess]=INVALID_SOCKET;
 }
 
-void add_app(DWORD _ApplID, appl_list** _list)
+void add_app(DWORD _ApplID, char* _list)
 {
-	if(*_list!=NULL)
-	{
-		appl_list* list=(*_list);
-		while(list->next)
-		{
-			list=list->next;
-		}
-
-		list->next=(appl_list*)mymalloc(sizeof(appl_list));
-		
-		list=list->next;
-		list->ApplID=_ApplID;
-		list->next=NULL;
-	} else {
-		(*_list)=(appl_list*)mymalloc(sizeof(appl_list));
-		(*_list)->ApplID=_ApplID;
-		(*_list)->next=NULL;
-	}
+  _list[_ApplID]=1;
 }
 
-void del_app(DWORD _ApplID, appl_list** _list)
+void del_app(DWORD _ApplID, char* _list)
 {
-	if((*_list)!=NULL)
-	{
-		appl_list* list=(*_list);
-		appl_list* prev=NULL;
-		
-		while(list!=NULL)
-		{
-			if(list->ApplID==_ApplID)
-			{
-				if(prev!=NULL)
-				{
-					prev->next=list->next;
-				} else {
-					(*_list)=list->next;
-				}
-				myfree((void*)list);
-				return;
-			}
-			prev=list;
-			list=list->next;
-		}
-	}
+  _list[_ApplID]=0;
 }
 
-DWORD getfirst_app(appl_list** _list)
+DWORD getfirst_app(char* _list)
 {
-	if((*_list)==NULL)
-	{
-		return 0;
-	} else {
-		appl_list* list=(*_list);
-		DWORD ret=list->ApplID;
-
-		(*_list)=list->next;
-
-		myfree((void*)list);
-		return ret;
-	}
-
+  int i=1;
+  while(i<=CAPI_MAXAPPL) {
+    if(_list[i]==1) {
+      _list[i]=0;
+      return i;
+    }
+  }
+  return 0;
 }
 
 
@@ -552,7 +556,7 @@ DWORD exec_capi_register(REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,ch
 	if(aheader->capi_error==0x0000)
 	{
 		// add registered app to list
-		add_app(aheader->app_id, &(client->registered_apps));
+		add_app(aheader->app_id, client->registered_apps);
 	}
 
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
@@ -579,7 +583,7 @@ DWORD exec_capi_release(REQUEST_HEADER* rheader,REQUEST_CAPI_RELEASE* rbody,char
 	if(aheader->capi_error==0x0000)
 	{
 		// delete registered app from list
-		del_app(rheader->app_id, &(client->registered_apps));
+		del_app(rheader->app_id, client->registered_apps);
 	}
 
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
@@ -888,7 +892,7 @@ DWORD exec_proxy_helo(REQUEST_HEADER* rheader, REQUEST_PROXY_HELO* rbody, char* 
 	client->version=rbody->version;
 
 	aheader->app_id=0;
-	abody->auth_type=_AUTH_TYPES;
+	abody->auth_type=AUTH_TYPES;
 	strcpy(abody->name,_SERVER_NAME);
 	abody->os=OS_TYPE_WINDOWS;
 	abody->timeout=_TIMEOUT;
@@ -912,6 +916,114 @@ DWORD exec_proxy_keepalive(REQUEST_HEADER* rheader,REQUEST_PROXY_KEEPALIVE* rbod
 	return NO_ERROR;
 }
 
+int try_auth_byip(SOCKET s)
+{
+	sockaddr_in addr;
+	char snet[16];
+	char smask[16];
+	DWORD net, mask;
+	DWORD len,len2;
+	
+	len=sizeof(addr);
+	
+	if(getsockname(s,(sockaddr*)&addr,(int*)&len)!=0) {
+		DebugOut("try_auth_byip: getsockname()",FALSE);
+		return -1;
+	}
+	
+	DWORD ip=addr.sin_addr.S_un.S_addr;
+	DWORD err;
+	HKEY key1,key2;
+
+	err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\capi20proxy\\server\\hosts_allow",0,KEY_QUERY_VALUE,&key1);
+	if(err!=ERROR_SUCCESS){
+		DebugOut("try_auth_byip: Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\capi20proxy\\server\\hosts_allow\"",FALSE);
+		return -1;
+	}
+
+	err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\capi20proxy\\server\\hosts_deny",0,KEY_QUERY_VALUE,&key2);
+	if(err!=ERROR_SUCCESS){
+		DebugOut("try_auth_byip: Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\capi20proxy\\server\\hosts_deny\"",FALSE);
+		return -1;
+	}
+
+	len=len2=16;
+	int i=0;
+	int allowed=false;
+	int denied=false;
+	
+	do {
+		err=RegEnumValue(key1,i++,snet,&len,0,NULL,(unsigned char*)smask,&len2);
+		if(err==ERROR_SUCCESS){
+			net=inet_addr(snet);
+			mask=inet_addr(smask);
+			
+			if((net&mask)==(ip&mask)) {
+				allowed=true;
+				break;
+			}
+		}
+	} while(err==ERROR_SUCCESS);
+
+	i=0;
+	do {
+		err=RegEnumValue(key2,i++,snet,&len,0,NULL,(unsigned char*)smask,&len2);
+		if(err==ERROR_SUCCESS){
+			net=inet_addr(snet);
+			mask=inet_addr(smask);
+			
+			if((net&mask)==(ip&mask)) {
+				denied=true;
+				break;
+			}
+		}
+	} while(err==ERROR_SUCCESS);
+	
+	RegCloseKey(key1);
+	RegCloseKey(key2);
+	
+	if(allowed && (!denied)) {
+		return 1;
+	} else {
+		return -1;
+	}
+}
+
+int try_auth_userpass(char* user, char* pass)
+{
+	DWORD err;
+	HKEY key;
+	DWORD len;
+	char test[256];
+	int allowed=0;
+	
+	if(user==NULL)
+		return -1;
+
+	err=RegOpenKeyEx(HKEY_LOCAL_MACHINE,"Software\\capi20proxy\\server\\users",0,KEY_QUERY_VALUE,&key);
+	if(err!=ERROR_SUCCESS){
+		DebugOut("try_auth_userpass: Could not open Registry Key \"HKEY_LOCAL_MACHINE\\Software\\capi20proxy\\server\\users\"",FALSE);
+		return -1;
+	}
+	
+	len=256;
+	err=RegQueryValueEx(key,user,NULL,NULL,(unsigned char*)test,&len);
+	if(err!=ERROR_SUCCESS){
+		return -1;		//user not found
+	} else {
+		if(strcmp(pass,test)==0) {
+			allowed=1;
+		}
+	}
+
+	RegCloseKey(key);
+	if(allowed) {
+		return 1;
+	} else {
+		return -1;
+	}
+}
+
 DWORD exec_proxy_auth(REQUEST_HEADER* rheader,REQUEST_PROXY_AUTH* rbody,char* rdata, client_data* client)
 {
 	char answer[_MSG_SIZE];
@@ -925,9 +1037,73 @@ DWORD exec_proxy_auth(REQUEST_HEADER* rheader,REQUEST_PROXY_AUTH* rbody,char* rd
 	aheader->message_type=TYPE_PROXY_AUTH;
 	aheader->message_id=rheader->message_id;
 	aheader->session_id=client->session;
-	aheader->proxy_error=PERROR_AUTH_TYPE_NOT_SUPPORTED;
+	
+	if(client->auth_data) {
+		myfree(client->auth_data);
+		client->auth_data=NULL;
+	}
+	client->auth_type=AUTH_NO_AUTH;
 
-	// NYI
+	switch(rbody->auth_type)
+	{
+	case AUTH_BY_IP:
+		if(AUTH_TYPES&AUTH_BY_IP) {
+			if(try_auth_byip(client->socket)!=-1) {
+				client->auth_type=AUTH_BY_IP;
+				aheader->proxy_error=PERROR_NONE;
+			} else {
+				aheader->proxy_error=PERROR_ACCESS_DENIED;
+			}
+		} else {
+		aheader->proxy_error=PERROR_AUTH_TYPE_NOT_SUPPORTED;
+		} 
+		break;
+
+	case AUTH_USERPASS:
+		if(AUTH_TYPES&AUTH_USERPASS) {
+
+			char user[256];
+			char pass[256];
+		
+			if(rheader->data_len>1) {
+				rdata[rheader->data_len]=0;	// data_len should be verified!
+				int len1=strlen(rdata);
+				int len2=rheader->data_len-len1;
+				if(len1>255 || len2>255)
+				{
+					DebugOut("exex_proxy_auth: user/pass too long",FALSE);
+					return -1;
+				}
+				
+				strcpy(user,rdata);
+				rdata+=strlen(user)+1;
+				strcpy(pass,rdata);
+			} else {
+				user[0]=pass[0]=0;
+			}
+
+			if(try_auth_userpass(user,pass)!=-1) {
+				client->auth_type=AUTH_USERPASS;
+				aheader->proxy_error=PERROR_NONE;
+			} else {
+				aheader->proxy_error=PERROR_ACCESS_DENIED;
+			}
+		} else {
+			aheader->proxy_error=PERROR_AUTH_TYPE_NOT_SUPPORTED;
+		}
+		break;
+
+	case AUTH_NO_AUTH:
+		if(!AUTH_REQUIRED) {
+			aheader->proxy_error=PERROR_NONE;
+		} else {
+			aheader->proxy_error=PERROR_ACCESS_DENIED;
+		}
+		break;
+
+	default:
+		aheader->proxy_error=PERROR_AUTH_TYPE_NOT_SUPPORTED;
+	}	
 
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
 	return send(client->socket,answer,aheader->message_len,0);
@@ -1011,7 +1187,7 @@ DWORD WINAPI StartSession(LPVOID param)
 	client.auth_type=AUTH_NO_AUTH;
 	client.keepalive=_TIMEOUT;
 	client.session=session+sess;
-	client.registered_apps=NULL;
+	for(int i=0; i<=CAPI_MAXAPPL; i++) client.registered_apps[i]=0;
 
 
 	while(run==1)
@@ -1240,7 +1416,7 @@ DWORD WINAPI StartSession(LPVOID param)
 	// now we release all registered Apps
 	DWORD app;
 
-	while(app=getfirst_app(&(client.registered_apps)))
+	while(app=getfirst_app(client.registered_apps))
 	{
 		CAPI_RELEASE(app);
 	}
@@ -1347,11 +1523,10 @@ SOCKET CreateSocket(int socktype, int protocol, UINT port)
 		return INVALID_SOCKET;
 	} 
 
-	SOCKADDR_IN local;
-	IN_ADDR localaddr={INADDR_ANY};
+	sockaddr_in local;
 	local.sin_family=AF_INET;
 	local.sin_addr=localaddr;
-	local.sin_port=htons(port);
+	local.sin_port=htons((unsigned short)PORT);
 
 	if(bind(sock,(SOCKADDR*)&local,sizeof(SOCKADDR_IN))==SOCKET_ERROR){
 		DWORD err=WSAGetLastError();

@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.8  2002/04/09 14:30:35  butzist
+ * works now quite fine
+ * added "tray-mode" for Win9x (when started without parameters)
+ * parameter "-service" for logging into file and starting ServiceControlDispatcher
+ *
  * Revision 1.7  2002/04/08 20:46:53  butzist
  * voice communication performance improved
  * doing automatic CAPI_RELEASE for each registered application when connection to client breaks
@@ -88,6 +93,12 @@ struct TOParams{
 	int* var;
 	int val;
 };
+
+#define CAPI_MAXAPPL	128
+#define __PORT	6674	// Fritzle's Telefonnummer :-)
+#define __LOGFILE		"capi20proxy.log"
+#define _MAX_SESSIONS	127
+#define _MSG_SIZE		10000
 
 extern SERVICE_STATUS          ServiceStatus; 
 extern SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
@@ -231,5 +242,5 @@ struct client_data
 	DWORD keepalive;
 	DWORD session;
 	int os;
-	appl_list* registered_apps;
+	char registered_apps[CAPI_MAXAPPL+1];
 };
