@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.6  2002/03/21 15:16:42  butzist
+ * started rewriting for new protocol
+ *
  * Revision 1.5  2002/03/03 20:38:19  butzist
  * added Log history
  *
@@ -309,14 +312,216 @@ void WINAPI ServiceStart (DWORD argc, LPTSTR *argv)
 	//Exiting
 	DebugOut("Exiting ServiceMain()",FALSE);
    return; 
-} 
+}
+
+
+DWORD exec_capi_register(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_REGISTER* rbody,char* rdata)
+{
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_REGISTER*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_REGISTER);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_REGISTER);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_REGISTER;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=rheader->session_id;
+
+	aheader->capi_error=CAPI_REGISTER(rbody->messageBufferSize,
+		rbody->maxLogicalConnection,
+		rbody->maxBDataBlocks,
+		rbody->maxBDataLen,
+		&(aheader->app_id));
+
+	aheader->proxy_error=PERROR_NO_ERROR;
+
+	return send(socke,answer,aheader->message_len,0);
+}
+
+DWORD exec_capi_release(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_RELEASE* rbody,char* rdata)
+{
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_RELEASE*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_RELEASE);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_RELEASE);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_RELEASE;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=rheader->session_id;
+
+	aheader->capi_error=CAPI_RELEASE(rheader->app_id);
+
+	aheader->proxy_error=PERROR_NO_ERROR;
+
+	return send(socke,answer,aheader->message_len,0);
+}
+
+DWORD exec_capi_putmessage(SOCKET socke,REQUEST_HEADER* rheader,REQUEST_CAPI_PUTMESSAGE* rbody,char* rdata)
+{
+	char answer[_MSG_SIZE];
+	ANSWER_HEADER *aheader=(ANSWER_HEADER*)answer;
+	ANSWER_CAPI_REGISTER *abody=(ANSWER_CAPI_PUTMESSAGE*)(answer+sizeof(ANSWER_HEADER));
+	char* adata=answer+sizeof(ANSWER_HEADER)+sizeof(ANSWER_CAPI_PUTMESSAGE);
+
+	aheader->header_len=sizeof(ANSWER_HEADER);
+	aheader->body_len=sizeof(ANSWER_CAPI_PUTMESSAGE);
+	aheader->data_len=0;
+	aheader->message_type=TYPE_CAPI_PUTMESSAGE;
+	aheader->message_id=rheader->message_id;
+	aheader->session_id=rheader->session_id;
+
+	if(rheader->data_len<8) // data too short
+	{
+		aheader->proxy_error=PERROR_PARSE_ERROR;
+	} else {
+		UINT len1;
+		memcpy(&len1,rdata,2);		// get the length of the CAPI message
+
+		if(rheader->data_len<len1) // data too short
+		{
+			aheader->proxy_error=PERROR_PARSE_ERROR;
+		} else {
+			unsigned char cmd1=rdata[4];
+			unsigned char cmd2=rdata[5];
+
+			if((cmd1==0x86) && (cmd2==0x82))	// If we got a DATA_B3 IND
+			{
+				if(len1<18)
+				{
+					aheader->proxy_error=PERROR_PARSE_ERROR;
+				} else {
+                    UINT len2;
+					memcpy(&len2,rdata+16,2);	// get the lengtzh of the data
+					
+					if(len1+len2>rheader->data_len)
+					{
+						aheader->proxy_error=PERROR_PARSE_ERROR;
+					} else {
+						DWORD pointer=(DWORD)rdata+len1;		// data is appended to the message
+						memcpy(rdata+12,&pointer,4);
+						aheader->proxy_error=PERROR_NO_ERROR;
+						
+						// call the CAPI function
+						aheader->capi_error=CAPI_PUT_MESSAGE(rheader->app_id,rdata);
+					}
+				}
+			}
+		}
+	}
+
+	// Here's where I stopped working :-)
+	return send(socke,answer,aheader->message_len,0);
+}
+
+DWORD exec_capi_getmessage(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_GETMESSAGE* body,char* data)
+{
+
+}
+
+DWORD exec_capi_waitforsignal(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_WAITFORSIGNAL* body,char* data)
+{
+
+}
+
+DWORD exec_capi_manufacturer(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_MANUFACTURER* body,char* data)
+{
+
+}
+
+DWORD exec_capi_version(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_VERSION* body,char* data)
+{
+
+}
+
+DWORD exec_capi_serial(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_SERIAL* body,char* data)
+{
+
+}
+
+DWORD exec_capi_profile(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_PROFILE* body,char* data)
+{
+
+}
+
+DWORD exec_capi_installed(SOCKET socke,REQUEST_HEADER* header,REQUEST_CAPI_INSTALLED* body,char* data)
+{
+
+}
+
+DWORD exec_proxy_helo(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_HELO* body,char* data)
+{
+
+}
+
+DWORD exec_proxy_keepalive(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_KEEPALVE* body,char* data)
+{
+
+}
+
+DWORD exec_proxy_auth(SOCKET socke,REQUEST_HEADER* header,REQUEST_PROXY_AUTH* body,char* data)
+{
+
+}
+
+bool verifyRequest(char* msg, UINT type)
+{
+	REQUEST_HEADER *header=(REQUEST_HEADER*)msg;
+
+	if(header->header_len<sizeof(REQUEST_HEADER))
+	{
+		// header too short
+		return false;
+	}
+
+	if(header->body_len<(unsigned int)rbodysize(type))
+	{
+		//  too short body
+		return false;
+	}
+
+	if(header->message_len>_MSG_SIZE)
+	{
+		// message too long
+		return false;
+	}
+	
+	if(header->header_len+header->body_len+header->data_len!=header->message_len)
+	{
+		// invalid lengths
+		return false;
+	}
+
+	if(header->proxy_error!=0x00)
+	{
+		// proxy error
+		return false;
+	}
+
+	if(header->message_type!=type)
+	{
+		// wrong message type
+		return false;
+	}
+
+	return true;
+}
+
+bool verifySessionId(char* msg, DWORD session)
+{
+	REQUEST_HEADER* header=(REQUEST_HEADER*)msg;
+
+	return (header->session_id==session);
+}
 
 DWORD WINAPI StartSession(LPVOID param)
 {
-	char* request=NULL;
-	sess=(DWORD)param;
 	DWORD err=1;
-	char* request;
+	char request[_MSG_SIZE];
 	SOCKET socke=sockets[sess];
 	LPVOID auth_data;
 	UINT auth_type;
@@ -326,17 +531,9 @@ DWORD WINAPI StartSession(LPVOID param)
 	do {
 		if(pause!=1)
 		{
-			request=malloc(_MSG_SIZE);
-			if(request==NULL)
-			{
-				DebugOut("StartSession(): malloc");
-				break;	// or perhaps just continue
-			}
-
 			err=recv(socke,request,_MSG_SIZE,0);	// blocking call
 			if(err==0 || err==SOCKET_ERROR)
 			{
-				free((void*)request);
 				break;
 			}
 
@@ -419,7 +616,6 @@ DWORD WINAPI StartSession(LPVOID param)
 			default:
 				DebugOut("ReceiveRequest(): Invalid Message Type",FALSE);
 			}
-			free((void*)request);
 		}
 	}
 
