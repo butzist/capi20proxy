@@ -39,17 +39,6 @@ int xquit ( int ret, char excuse[128]) {
 	return 0;
 }
 
-///// VERIFY_SESSION_ID: CHECK THE CLIENTS SESSION ID
-int verify_session_id( unsigned id )
-{
-	if ( id == sessionID ) {
-		return 0;
-	}
-	return 1;
-}
-
-
-
 // Signal handlers
 // for main process
 void sigparent(int signal)

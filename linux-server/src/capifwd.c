@@ -110,43 +110,43 @@ int main ( int argc, char* argv[] ) {
 					case TYPE_PROXY_KEEPALIVE:
 						break;
 					case TYPE_CAPI_REGISTER:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if ( request->session_id != sessionID ) break;
 						sentbytes=exec_capi_register((void*)in_packet);
 						break;
 					case TYPE_CAPI_RELEASE:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_release ((void*)in_packet);
 						break;
 					case TYPE_CAPI_INSTALLED:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_isinstalled ((void*)in_packet);
 						break;
 					case TYPE_CAPI_VERSION:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_version((void*)in_packet);
 						break;
 					case TYPE_CAPI_SERIAL:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_serial ((void*)in_packet);
 						break;
 					case TYPE_CAPI_MANUFACTURER:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID  ) break;
 						sentbytes=exec_capi_manufacturer((void*)in_packet);
 						break;
 					case TYPE_CAPI_PROFILE:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_profile((void*)in_packet);
 						break;
 					case TYPE_CAPI_WAITFORSIGNAL:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_waitforsignal((void*)in_packet);
 						break;
 					case TYPE_CAPI_GETMESSAGE:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_getmessage((void*)in_packet);
 						break;
 			    		case TYPE_CAPI_PUTMESSAGE:
-						if ( verify_session_id( request->session_id ) != 0 ) break;
+						if (  request->session_id != sessionID ) break;
 						sentbytes=exec_capi_putmessage((void*)in_packet);
 						break;
 					default:
