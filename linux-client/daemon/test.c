@@ -36,17 +36,14 @@ int main(void)
 	memcpy(infobuffer,&BUFFER_LEN,sizeof(int));
 	ret=read(file,infobuffer+sizeof(int),BUFFER_LEN);
 
-	node=open("/dev/capiproxy", O_NONBLOCK );
+	node=open("/dev/capiproxy", 0 );
 
 	ioctl(node,IOCTL_SET_DATA,infobuffer);
 
-	while(i<5 && !shutdown) {
+	while(!shutdown) {
 		__u16 len;
 		__u8 cmd,subcmd;
 		__u16 appl;
-		
-		sleep(1);
-		i++;
 		
 		if(read(node,msgbuffer,10000)<=0)
 			continue;
