@@ -16,6 +16,9 @@
 
 /* The CVS log:
  * $Log$
+ * Revision 1.6  2002/03/29 07:52:32  butzist
+ * seems to work (got problems with DATA_B3)
+ *
  * Revision 1.5  2002/03/21 15:16:42  butzist
  * started rewriting for new protocol
  *
