@@ -69,12 +69,12 @@ int exec_proxy_auth(void *in_packet) {
 	struct ANSWER_PROXY_AUTH *body;
 	struct ANSWER_HEADER *head;
 	char *authdata;
-	int noverfy;
+	int noverfy=-1;
 	
 	lenp = (struct REQUEST_PROXY_AUTH*) (in_packet+sizeof(struct REQUEST_HEADER));
 	if ( lenp->auth_len != 0 ) {
-		authdata = (char*) malloc( lenp.auth_len * sizeof(char));
-		memcpy (authdata, (char) (in_packet + sizeof(struct REQUEST_HEADER) + sizeof( struct REQUEST_PROXY_AUTH)), lenp->auth_len );
+		authdata = (char*) malloc( lenp->auth_len * sizeof(char));
+		memcpy (authdata, (in_packet + sizeof(struct REQUEST_HEADER) + sizeof( struct REQUEST_PROXY_AUTH)), lenp->auth_len );
 		noverfy = up_auth(authdata);
 	}
  

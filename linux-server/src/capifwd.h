@@ -129,7 +129,10 @@ struct _client_info {
 	int messageBufferLen;			// buffer length used by the client
 } client_info;
 
-
+struct AUTH_USERPASS_DATA {
+	unsigned uname_len;
+	unsigned passwd_len;
+};
 
 
 int quit( int ret );

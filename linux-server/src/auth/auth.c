@@ -20,17 +20,12 @@
 
 #include "../capifwd.h"
 
-struct AUTH_USERPASS_DATA {
-	unsigned uname_len;
-	unsigned passwd_len;
-}
-
-
 /* 
  * This function should return -1 for an authentication failure and any other value 
  * for success 
  */
-int up_auth(char* indata) 
+
+int up_auth(char* indata)
 {
 	struct AUTH_USERPASS_DATA *info;
 	char *uname;
