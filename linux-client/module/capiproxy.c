@@ -25,6 +25,7 @@
  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -38,6 +39,7 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/tqueue.h>
+#include "/usr/src/linux-2.4.19/include/linux/modversions.h"
 
 #include "capilli.h"
 #include "capiutil.h"
@@ -48,7 +50,6 @@ EXPORT_NO_SYMBOLS;
 #define CAPIPROXY_MAXCONTR	4
 
 #define CAPIPROXY_MAJOR		69
-#define MAX_CONTROLLERS		16
 #define MSG_QUEUE_LENGTH	16
 
 #define CAPIPROXY_VERSIONLEN	8
@@ -108,12 +109,6 @@ typedef struct __capi20proxy_card
 	
 	__u8 applications[CAPI_MAXAPPL];	/* application stats are per-controller! */
 } capi20proxy_card;
-
-/*typedef struct __capiproxy_appl {
-	capi_register_params 	rp;
-	__u16 			applid;		/ kcapi application identifier /
-	__u8			status;		/ tells our module whether this appl is up /
-} capiproxy_appl;*/
 
 static capi20proxy_card cards[CAPIPROXY_MAXCONTR];
 static spinlock_t kernelcapi_lock;
@@ -228,6 +223,11 @@ inline int VALID_APPLID(capi20proxy_card *card, __u16 a)
 	return (a && (a <= CAPI_MAXAPPL) && APPL(card,a));
 }
 
+
+
+/* -------------------------------------------------------------------------- */
+
+
 static void capiproxy_flush_queue(capi20proxy_card *card)
 {
 	struct sk_buff *skb;
@@ -285,10 +285,10 @@ void capiproxy_remove_ctr(struct capi_ctr *ctrl)
 	 * We won't do this immediately
 	 * let first the daemon detach!
 	 * 
-	 *  ctrl->suspend_output(ctrl);
+	 *  (*ctrl->suspend_output)(ctrl);
 	 *  capiproxy_flush_queue(CARD(ctrl->cnr));
 	 *  capiproxy_send_message(ctrl, skb);
-	 *  di->detach_ctr(ctrl);
+	 *  (*di->detach_ctr)(ctrl);
 	 *  ((capi20proxy_card*)ctrl->driverdata)->status = CARD_FREE;
 	*/
 }
@@ -298,7 +298,7 @@ void capiproxy_reset_ctr(struct capi_ctr *ctrl)
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 
 	capiproxy_flush_queue(card);
-	ctrl->reseted(ctrl);
+	(*ctrl->reseted)(ctrl);
 }
 
 static void capiproxy_register_internal(struct capi_ctr *ctrl, __u16 appl,
@@ -372,14 +372,14 @@ void capiproxy_release_appl(struct capi_ctr *ctrl,
 	capi20proxy_card *card = (capi20proxy_card*)ctrl->driverdata;
 	
 	if((!VALID_APPLID(card,appl)) || APPL_IS_FREE(card,appl)) {
-		ctrl->appl_released(ctrl, appl);
+		(*ctrl->appl_released)(ctrl, appl);
 		printk(KERN_ERR "capi20proxy card %d: Releasing free application or invalid applid -- %d\n", ctrl->cnr, appl);
 		return;
 	}
 	capiproxy_release_internal(ctrl, appl);
 	APPL_MARK_FREE(card,appl);
 	//DEC_MOD_USE_COUNT;	
-	ctrl->appl_released(ctrl, appl);
+	(*ctrl->appl_released)(ctrl, appl);
 	printk(KERN_NOTICE "capi20proxy card %d: Application released %d\n", ctrl->cnr, appl);
 }
 
@@ -422,7 +422,7 @@ void capiproxy_send_message(struct capi_ctr *ctrl,
 
 	switch(CAPIMSG_COMMAND(skb->data)) {
 		case CAPI_DISCONNECT_B3_RESP:
-			ctrl->free_ncci(ctrl, applid, CAPIMSG_NCCI(skb->data));
+			(*ctrl->free_ncci)(ctrl, applid, CAPIMSG_NCCI(skb->data));
 			break;
 		default:
 			break;
@@ -536,7 +536,7 @@ int capiproxy_ioctl(struct inode *inode,
 			push_user_buffer((void *)(&(ctrl->profile)),
 					(void **)(&temp),
 					sizeof(struct capi_profile));
-			ctrl->ready(ctrl);
+			(*ctrl->ready)(ctrl);
 			printk(KERN_NOTICE "capi20proxy card %d: controller ready", ctrl->cnr);
 			return 0;
 		}
@@ -544,13 +544,13 @@ int capiproxy_ioctl(struct inode *inode,
 		{
 			push_user_buffer((void *)&appl,(void **)(&temp),2);			
 			APPL_MARK_REVOKED(card,appl);
-			ctrl->appl_released(ctrl, appl);
+			(*ctrl->appl_released)(ctrl, appl);
 			printk(KERN_NOTICE "capi20proxy card %d: deamon failed to register application %d", ctrl->cnr, appl);
 			return 0;
 		}
 		case IOCTL_APPL_REGISTERED:
 		{
-			ctrl->appl_registered(ctrl, appl);
+			(*ctrl->appl_registered)(ctrl, appl);
 			APPL_MARK_CONFIRMED(card,appl);
 			//INC_MOD_USE_COUNT;
 			printk(KERN_NOTICE "capi20proxy card %d: daemon confirmed application %d", ctrl->cnr, appl);
@@ -560,6 +560,8 @@ int capiproxy_ioctl(struct inode *inode,
 			return -EIO;
 	}
 }
+
+/* --------------------------------------------------------------------------------- */
 
 /* and what does this do? */
 static void handle_send_msg(void *dummy)
@@ -589,6 +591,8 @@ static void handle_send_msg(void *dummy)
  * CAPI with the application identifiers known to the
  * SERVER's CAPI
  */
+
+/* ----------------------------------------------------------------------------------- */
 
 /* static ? */
 ssize_t capiproxy_read(struct file *file,
@@ -707,7 +711,7 @@ ssize_t capiproxy_write(struct file *file,
 	switch(CAPIMSG_COMMAND(skb->data)) {
 		case CAPI_CONNECT_B3_CONF:
 		case CAPI_CONNECT_B3_IND:
-			ctrl->new_ncci(ctrl,
+			(*ctrl->new_ncci)(ctrl,
 					appl,
 					ncci,
 					CAPI_MAXDATAWINDOW);
@@ -719,7 +723,7 @@ ssize_t capiproxy_write(struct file *file,
 	spin_lock(&(card->ctrl_lock));
 	card->in_sk++;
 	spin_unlock(&(card->ctrl_lock));
-	ctrl->handle_capimsg(ctrl, appl, skb);
+	(*ctrl->handle_capimsg)(ctrl, appl, skb);
 	return length;
 }
 
@@ -791,9 +795,9 @@ int capiproxy_release(struct inode *inode, struct file *file)
 
 	printk(KERN_NOTICE "capi20proxy: removing Controller %d", ctrl->cnr);
 	
-	ctrl->suspend_output(ctrl);
+	(*ctrl->suspend_output)(ctrl);
 	capiproxy_flush_queue(card);
-	di->detach_ctr(ctrl);
+	(*di->detach_ctr)(ctrl);
 	
 	file->private_data 	= NULL;
 	card->status		= CARD_FREE;
@@ -826,7 +830,24 @@ static void capiproxy_init_appls(capi20proxy_card *card)
 	memset((void *)card->applications, APPL_FREE, CAPI_MAXAPPL);
 }
 
-int __init capiproxy_init(void)
+/* ------------------------------------------------------------- */
+
+EXPORT_SYMBOL(capiproxy_register_appl);
+EXPORT_SYMBOL(capiproxy_release_appl);
+EXPORT_SYMBOL(capiproxy_remove_ctr);
+EXPORT_SYMBOL(capiproxy_send_message);
+EXPORT_SYMBOL(capiproxy_reset_ctr);
+EXPORT_SYMBOL(capiproxy_load_firmware);
+EXPORT_SYMBOL(capiproxy_procinfo);
+EXPORT_SYMBOL(capiproxy_read_proc);
+
+EXPORT_SYMBOL(capiproxy_ioctl);
+EXPORT_SYMBOL(capiproxy_read);
+EXPORT_SYMBOL(capiproxy_write);
+EXPORT_SYMBOL(capiproxy_open);
+EXPORT_SYMBOL(capiproxy_release);
+
+static int __init capiproxy_init(void)
 {
 	capiproxy_init_cards();
 	init_waitqueue_head(&rmmod_queue);
@@ -849,7 +870,7 @@ int __init capiproxy_init(void)
 	}
 }
 
-void __exit capiproxy_exit(void)
+static void __exit capiproxy_exit(void)
 {
 	int i;
 	capi20proxy_card *card;
