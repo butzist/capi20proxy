@@ -19,6 +19,9 @@
 
 /*
  * $Log$
+ * Revision 1.11  2002/04/09 16:28:09  butzist
+ * show the console again before quitting (so the user can see the errors and close it)
+ *
  * Revision 1.10  2002/04/09 14:30:35  butzist
  * works now quite fine
  * added "tray-mode" for Win9x (when started without parameters)
@@ -786,16 +789,13 @@ DWORD exec_capi_version(REQUEST_HEADER* rheader,REQUEST_CAPI_VERSION* rbody,char
 	aheader->session_id=client->session;
 	aheader->proxy_error=PERROR_NONE;
 
-	// this cound be a problem for we need unsigned long (32bit) anfd Friedrich only imlemented 16bit in the protocol
-	// oh, Fritzle... warum hörst du nie auf mich... OK, let's try to truncate the return values
-
 	DWORD versions[4];
 
 	aheader->capi_error=CAPI_GET_VERSION(&versions[0],&versions[1],&versions[2],&versions[3]);
-	abody->driver.major=(UINT)versions[0];
-	abody->driver.minor=(UINT)versions[1];
-	abody->manufacturer.major=(UINT)versions[2];
-	abody->manufacturer.minor=(UINT)versions[3];
+	abody->driver.major=versions[0];
+	abody->driver.minor=versions[1];
+	abody->manufacturer.major=versions[2];
+	abody->manufacturer.minor=versions[3];
 
 	aheader->message_len=aheader->header_len+aheader->body_len+aheader->data_len;
 	return send(client->socket,answer,aheader->message_len,0);
