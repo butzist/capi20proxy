@@ -19,6 +19,11 @@
 
 /*
  * $Log$
+ * Revision 1.10  2002/04/09 14:30:35  butzist
+ * works now quite fine
+ * added "tray-mode" for Win9x (when started without parameters)
+ * parameter "-service" for logging into file and starting ServiceControlDispatcher
+ *
  * Revision 1.9  2002/04/08 20:46:53  butzist
  * voice communication performance improved
  * doing automatic CAPI_RELEASE for each registered application when connection to client breaks
@@ -230,16 +235,24 @@ int main(int argc, char* argv[])
 		if(RunningThread==NULL){
 			DebugOut("main(): CreateThread");
 		} else {
+			HWND console=NULL;
+
 			if(!debug)
 			{
 				char title[512];		// ein bissl umständlich... aber GetConsoleWindow() gibt es erst ab Win2k
 				GetConsoleTitle(title,512);
-				HWND console=FindWindow(NULL,title);
+				console=FindWindow(NULL,title);
 				ShowWindow(console,SW_HIDE);
 			}
 			
 			DialogBox(GetModuleHandle(NULL),MAKEINTRESOURCE(IDD_DIALOG),NULL,dialogProc);
 			// this is a modal dialog box
+			
+			if(console!=NULL)
+			{
+				ShowWindow(console,SW_SHOW);
+			}
+
 			ServiceExit();
 		}
 	}
