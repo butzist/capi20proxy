@@ -526,7 +526,7 @@ int capiproxy_ioctl(struct inode *inode,
 		}
 		case IOCTL_ERROR_REGFAIL:
 		{
-			push_user_buffer((void *)&appl,(void **)(&temp),2);			
+			appl=(__u16)ioctl_param;			
 			APPL_MARK_REVOKED(card,appl);
 			(*ctrl->appl_released)(ctrl, appl);
 			printk(KERN_NOTICE "%s card %d: deamon failed to register application %d", DRIVERNAME, ctrl->cnr, appl);
@@ -534,6 +534,7 @@ int capiproxy_ioctl(struct inode *inode,
 		}
 		case IOCTL_APPL_REGISTERED:
 		{
+			appl=(__u16)ioctl_param;			
 			(*ctrl->appl_registered)(ctrl, appl);
 			APPL_MARK_CONFIRMED(card,appl);
 			//INC_MOD_USE_COUNT;
@@ -772,10 +773,6 @@ int capiproxy_release(struct inode *inode, struct file *file)
 
 	card = (capi20proxy_card *)file->private_data;
 	ctrl = card->ctrl;
-
-	/*
-	 * should this not be done somehow by kernelcapi?
-	 */
 
 	printk(KERN_NOTICE "%s: removing Controller %d", DRIVERNAME, ctrl->cnr);
 	
