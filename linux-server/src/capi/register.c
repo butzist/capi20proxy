@@ -56,10 +56,7 @@ int exec_capi_register(void *in_packet) {
 	head->capi_error = return_type;
 	head->proxy_error = 0;
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 

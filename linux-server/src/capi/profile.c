@@ -47,9 +47,8 @@ int exec_capi_profile(void *in_packet) {
 	head->session_id = sessionID;
 	head->proxy_error = 0;
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
+	
 
 	return numbytes;
 }

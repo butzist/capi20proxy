@@ -31,7 +31,8 @@ int exec_capi_isinstalled(void *in_packet) {
 	// Step 2: execute command
 	request = (struct REQUEST_HEADER *) in_packet;
 	return_type = capi20_isinstalled ( );
-
+  	
+	
 	// Step 3: compose return header
 	head = (struct ANSWER_HEADER*) out_packet;
 	head->header_len = sizeof (struct ANSWER_HEADER);
@@ -46,10 +47,8 @@ int exec_capi_isinstalled(void *in_packet) {
 	head->proxy_error = 0;
 
 	// Step 4: compose return body
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
+	
 	return numbytes;
 }
 

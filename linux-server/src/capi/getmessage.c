@@ -81,10 +81,7 @@ int exec_capi_getmessage(void *in_packet) {
 
 	head->message_len = head->header_len + head->body_len + head->data_len;
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 

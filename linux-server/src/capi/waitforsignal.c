@@ -71,10 +71,8 @@ int exec_capi_waitforsignal(void *in_packet) {
 	head->app_id = data.app_id;
 	head->session_id = sessionID;
 
-	pthread_mutex_lock(&smtx);
 	numbytes=send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
+	
 	if(pid==0)
 	{
 		exit(0);

@@ -47,11 +47,8 @@ int exec_capi_manufacturer(void *in_packet) {
 	head->proxy_error = 0;
 	head->capi_error = 0x0000;
 
-	// Step 4: compose return body
-	pthread_mutex_lock(&smtx);
+	
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 
 

@@ -54,10 +54,7 @@ int exec_proxy_helo(void *in_packet) {
 	helo_re->version = local_version;
 	helo_re->auth_type = AUTH_NO_AUTH;		//Authentification not yet supported.
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, helo_head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 
@@ -90,10 +87,7 @@ int exec_proxy_auth(void *in_packet) {
 	body->auth_type=0;
 	body->auth_len=0;
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 
@@ -125,10 +119,7 @@ int exec_proxy_shutdown(char *excuse) {
 	sdown_re = (struct ANSWER_PROXY_SHUTDOWN*) (out_packet + sizeof(struct ANSWER_HEADER));
 	strcpy ( sdown_re->reason, excuse );
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, sdown_head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 

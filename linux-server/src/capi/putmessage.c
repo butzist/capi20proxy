@@ -94,10 +94,7 @@ int exec_capi_putmessage(void *in_packet) {
 		}
 	}
 
-	pthread_mutex_lock(&smtx);
 	numbytes = send( sock, out_packet, head->message_len, 0);
-	pthread_mutex_unlock(&smtx);
-
 	return numbytes;
 }
 
