@@ -1,195 +1,239 @@
 /*
- *   capi20proxy (Provides a remote CAPI port over TCP/IP)
- *   Copyright (C) 2002  Adam Szalkowski <adam@szalkowski.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
 
-/*
- * $Log$
- */
+  CAPI 2.0 Proxy
+  Protocol Definition Release 2 Prototype 4
 
-/*
-    Declarations of protocol structs
+  7th March 2002. Written in Rannoch School
+  8th March 2002. Reviewed in Baden-Baden :-)
+
+  This protocol was designed to provide easy CAPI forwarding over a
+  local area network or the internet.
+  The protocol is pretty self-explanationary, so no further Docu. is
+  provided at the moment. If you have problems, just contact one of
+  the maintainers.
+
 */
 
-enum DATA_TYPE
-{
-TYPE_REGISTER,
-TYPE_RELEASE,
-TYPE_PUT_MESSAGE,
-TYPE_GET_MESSAGE,
-TYPE_WAIT_FOR_SIGNAL,
-TYPE_GET_MANUFACTURER,
-TYPE_GET_VERSION,
-TYPE_GET_SERIAL_NUMBER,
-TYPE_GET_PROFILE,
-TYPE_INSTALLED,
-TYPE_WHO_AM_I
+/* The CVS log:
+ * $Log$
+ * Revision 1.3  2002/03/09 16:58:52  frlind
+ *
+ * the new tcp/ip protocol-based protocol revision 2
+ *
+ */
+
+
+/* Exlanations of data types used in this ("platform independent") protocol:
+ name   		| type 	| size 	| signed 	| byte order
+ -------------------------------------------------------------------
+ char   		| integer 	| 1 octet 	| yes  	| -
+ int    		| integer 	| 2 " 	| yes  	| iA-32 standard
+ unsigned  	| integer 	| 2 " 	| no  	|   "
+ unsigned long | integer 	| 4 " 	| no  	|   "
+*/
+
+#ifndef __PROTOCOL_H__
+#define __PROTOCOL_H__
+#include <time.h>
+
+// Operating System types
+
+#define OS_TYPE_WINDOWS 1
+#define OS_TYPE_LINUX 2
+#define OS_TYPE_GENERIC 0
+
+
+// Proxy error/warning codes
+
+#define PERROR_NONE		0x00
+
+#define PERROR_AUTH_REQUIRED	0x01	// indicate that you should use authentification (only for use in ANSWER_PROXY_HELO)
+#define PERROR_WRONG_SESSION	0x02	// unknown session id, message lost
+#define	PERROR_ACCESS_DENIED	0x03	// message not processed, because of lack of access rights
+#define PERROR_UNKNOWN_APP	0x04	// unknown/illegal ApplId in the message
+#define PERROR_UNKNOWN_CTRL	0x05	// unknown/illegal ControllerId in the message
+
+#define PERROR_NO_RECOURCES	0x80	// necessary resources not available
+#define PERROR_CRITICAL_INTERNAL_ERROR	0x81	// server must shut down
+#define PERROR_SOCKET_ERROR	0x82	// maybe try to resend the message
+#define PERROR_CRITICAL_SOCKET_ERROR	0x83	// must disconnect connection
+
+#define PERROR_CAPI_ERROR	0xff	// message not processed due to CAPI error
+
+// auth types
+
+#define AUTH_NO_AUTH	0x00
+#define AUTH_BY_IP		0x01
+#define	AUTH_USERPASS	0x02
+#define	AUTH_RSA		0x03
+
+/// define types:
+
+#define TYPE_CAPI_REGISTER  1
+#define TYPE_CAPI_RELEASE  2
+#define TYPE_CAPI_PUTMESSAGE 3
+#define TYPE_CAPI_GETMESSAGE 4
+#define TYPE_CAPI_WAITFORSIGNAL 5
+#define TYPE_CAPI_MANUFACTURER 6
+#define TYPE_CAPI_VERSION  7
+#define TYPE_CAPI_SERIAL  8
+#define TYPE_CAPI_PROFILE  9
+#define TYPE_CAPI_INSTALLED  10
+#define TYPE_PROXY_HELO   99
+#define TYPE_PROXY_AUTH   98
+#define TYPE_PROXY_KEEPALIVE 97
+#define TYPE_PROXY_SHUTDOWN  96
+
+
+const char *revision="$Revision$";
+
+struct __version_t {
+ unsigned major;  // major version for incompatible versions
+ unsigned minor;  // minor version for compatible versions
 };
 
-struct REQUEST_DATA_REGISTER
-{
-	DWORD MessageBufferSize;
-	DWORD maxLogicalConnection;
-	DWORD maxBDataBlocks;
-	DWORD maxBDataLen;
+// CLIENT REQUESTS //
+// protocol specific
+struct REQUEST_PROXY_HELO {  // type number: 99
+ char name[64];    // name of the client (for logging)
+ int os;      // operating system of the client
+ struct __version_t version; // version of the client
 };
 
-struct REQUEST_DATA_RELEASE
-{
-	DWORD ApplID;
+struct REQUEST_PROXY_AUTH {  // type number: 98
+ unsigned auth_len;
 };
 
-struct REQUEST_DATA_PUT_MESSAGE
-{
-	DWORD ApplID;
-	SOCKADDR_IN me;
+struct REQUEST_PROXY_KEEPALIVE {  // type number: 97
 };
 
-struct REQUEST_DATA_GET_MESSAGE
-{
-	DWORD ApplID;
-	SOCKADDR_IN me;
+// CAPI specific
+struct REQUEST_CAPI_REGISTER {  // type number: 1
+	unsigned long messageBufferSize;
+	unsigned long maxLogicalConnection;
+	unsigned long maxBDataBlocks;
+	unsigned long maxBDataLen;	// added again
 };
 
-struct REQUEST_DATA_WAIT_FOR_SIGNAL
-{
-	DWORD ApplID;
+struct REQUEST_CAPI_RELEASE {  // type number: 2
 };
 
-struct REQUEST_DATA_GET_MANUFACTURER
-{
+struct REQUEST_CAPI_PUTMESSAGE {  // type number: 3
+ // length of message provided in the header as data_len
 };
 
-struct REQUEST_DATA_GET_VERSION
-{
+struct REQUEST_CAPI_GETMESSAGE {  // type number: 4
 };
 
-struct REQUEST_DATA_GET_SERIAL_NUMBER
-{
+struct REQUEST_CAPI_WAITFORSIGNAL { // type number: 5
+ // we do not provide a timeout value, for the Win32 CAPI does not support
 };
 
-struct REQUEST_DATA_GET_PROFILE
-{
-	DWORD CtrlNr;
+struct REQUEST_CAPI_MANUFACTURER {  // type number: 6
 };
 
-struct REQUEST_DATA_INSTALLED
-{
+struct REQUEST_CAPI_VERSION {  // type number: 7
 };
 
-struct REQUEST_DATA_WHO_AM_I
-{
+struct REQUEST_CAPI_SERIAL {  // type number: 8
 };
 
-struct ANSWER_DATA_REGISTER
-{
-	DWORD ret;
-	DWORD ApplID;
+
+struct REQUEST_CAPI_PROFILE {  // type number: 9
 };
 
-struct ANSWER_DATA_RELEASE
-{
-	DWORD ret;
+struct REQUEST_CAPI_INSTALLED {  // type number: 10
 };
 
-struct ANSWER_DATA_PUT_MESSAGE
-{
-	DWORD ret;
+
+// SERVER ANSWERS //
+
+// protocol specific
+struct ANSWER_PROXY_HELO {  // type number: 99
+ char name[64];    // some kind of name for the server (zero-terminated)
+ int os;      // the operating system of the server
+ struct __version_t version; // the version of the server
+ int auth_supported[4];  // the server tells the client which auth-methods
+ int timeout;
 };
 
-struct ANSWER_DATA_GET_MESSAGE
-{
-	DWORD ret;
+struct ANSWER_PROXY_AUTH {  // type number: 98
+ unsigned auth_type;   // authentication type desired
+ unsigned auth_len;   // length of authentication data
 };
 
-struct ANSWER_DATA_WAIT_FOR_SIGNAL
-{
-	DWORD ret;
+struct ANSWER_PROXY_KEEPALIVE { // type number: 97
 };
 
-struct ANSWER_DATA_GET_MANUFACTURER
-{
-	DWORD ret;
-	char szBuffer[64];
+struct ANSWER_PROXY_SHUTDOWN {  // type number: 96
+ char reason[128];
+ // z.B. "Ich muss dringend aufs Klo!"; :-)
+ // no answer from the client expected
 };
 
-struct ANSWER_DATA_GET_VERSION
-{
-	DWORD ret;
-	DWORD CAPIMajor;
-	DWORD CAPIMinor;
-	DWORD ManufacturerMajor;
-	DWORD MAnufacturerMinor;
+// CAPI specific
+struct ANSWER_CAPI_REGISTER {  // type number: 1
 };
 
-struct ANSWER_DATA_GET_SERIAL_NUMBER
-{
-	DWORD ret;
-	char szBuffer[8];
+struct ANSWER_CAPI_RELEASE {  // type number: 2
 };
 
-struct ANSWER_DATA_GET_PROFILE
-{
-	DWORD ret;
-	char szBuffer[64];
+struct ANSWER_CAPI_PUTMESSAGE { // type number: 3
 };
 
-struct ANSWER_DATA_INSTALLED
-{
-	DWORD ret;
+struct ANSWER_CAPI_GETMESSAGE { // type number: 4
+ // we use the header data_len value to get the length of the message
 };
 
-struct ANSWER_DATA_WHO_AM_I
-{
-	SOCKADDR_IN you;
+struct ANSWER_CAPI_WAITFORSIGNAL { // type number: 5
 };
 
-struct REQUEST
-{
-	DATA_TYPE type;
-	union REQUEST_DATA{
-		REQUEST_DATA_REGISTER rd_register;
-		REQUEST_DATA_RELEASE rd_release;
-		REQUEST_DATA_PUT_MESSAGE rd_put_message;
-		REQUEST_DATA_GET_MESSAGE rd_get_message;
-		REQUEST_DATA_WAIT_FOR_SIGNAL rd_wait_for_signal;
-		REQUEST_DATA_GET_MANUFACTURER rd_get_manufacturer;
-		REQUEST_DATA_GET_VERSION rd_get_version;
-		REQUEST_DATA_GET_SERIAL_NUMBER rd_get_serial_number;
-		REQUEST_DATA_GET_PROFILE rd_get_profile;
-		REQUEST_DATA_INSTALLED rd_installed;
-		REQUEST_DATA_WHO_AM_I rd_who_am_i;
-	} data;
+struct ANSWER_CAPI_MANUFACTURER { // type number: 6
+ char manufacturer[64];
 };
 
-struct ANSWER
-{
-	DATA_TYPE type;
-	union ANSWER_DATA{
-		ANSWER_DATA_REGISTER ad_register;
-		ANSWER_DATA_RELEASE ad_release;
-		ANSWER_DATA_PUT_MESSAGE ad_put_message;
-		ANSWER_DATA_GET_MESSAGE ad_get_message;
-		ANSWER_DATA_WAIT_FOR_SIGNAL ad_wait_for_signal;
-		ANSWER_DATA_GET_MANUFACTURER ad_get_manufacturer;
-		ANSWER_DATA_GET_VERSION ad_get_version;
-		ANSWER_DATA_GET_SERIAL_NUMBER ad_get_serial_number;
-		ANSWER_DATA_GET_PROFILE ad_get_profile;
-		ANSWER_DATA_INSTALLED ad_installed;
-		ANSWER_DATA_WHO_AM_I ad_who_am_i;
-	} data;
+struct ANSWER_CAPI_VERSION {  // type number: 7
+ struct __version_t manufacturer;
+ struct __version_t driver;
 };
+
+struct ANSWER_CAPI_SERIAL {  // type number: 8
+ char serial[8];
+};
+
+struct ANSWER_CAPI_PROFILE {  // type number: 9
+ char profile[64];
+};
+
+struct ANSWER_CAPI_INSTALLED { // type number: 10
+};
+
+
+struct REQUEST_HEADER {
+ unsigned message_len;
+ unsigned header_len;
+ unsigned body_len;
+ unsigned data_len;
+
+ unsigned  message_id;
+ unsigned  message_type;
+ unsigned  app_id;
+ unsigned  controller_id;
+ unsigned  session_id;
+};
+
+
+struct ANSWER_HEADER {
+ unsigned message_len;
+ unsigned header_len;
+ unsigned body_len;
+ unsigned data_len;
+
+ unsigned  message_id;
+ unsigned  message_type;
+ unsigned  app_id;
+ unsigned  session_id;
+ unsigned  proxy_error;
+ unsigned long capi_error;
+};
+#endif

@@ -109,6 +109,10 @@ SOURCE=.\StdAfx.cpp
 # PROP Default_Filter "h;hpp;hxx;hm;inl"
 # Begin Source File
 
+SOURCE=.\capi2032.h
+# End Source File
+# Begin Source File
+
 SOURCE=.\protocol.h
 # End Source File
 # Begin Source File
